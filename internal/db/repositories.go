@@ -3,6 +3,8 @@ package db
 import (
 	"context"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"e-logging-app/internal/models"
@@ -24,6 +26,8 @@ type DeviceRepository interface {
 	CreateDevice(ctx context.Context, device *models.Device) error
 	GetDevices(ctx context.Context) ([]*models.Device, error)
 	GetDeviceByFingerprint(ctx context.Context, fingerprint string) (*models.Device, error)
+	GetDeviceByID(ctx context.Context, id uuid.UUID) (*models.Device, error)
+	UpdateDevice(ctx context.Context, id uuid.UUID, update *models.DeviceUpdate) (*models.Device, error)
 	DeactivateDevice(ctx context.Context, id uuid.UUID) error
 }
 
@@ -32,6 +36,7 @@ type LogRepository interface {
 	GetLogs(ctx context.Context, filters map[string]interface{}, sortBy string, order string, limit int, offset int) ([]*models.Log, error)
 	UpdateLog(ctx context.Context, id uuid.UUID, log *models.Log) error
 	GetLogByID(ctx context.Context, id uuid.UUID) (*models.Log, error)
+	GetDashboardStats(ctx context.Context) (*models.DashboardStats, error)
 }
 
 type userRepository struct {
@@ -137,12 +142,12 @@ func (r *stationRepository) GetStations(ctx context.Context) ([]*models.Station,
 }
 
 func (r *deviceRepository) CreateDevice(ctx context.Context, device *models.Device) error {
-	query := `INSERT INTO devices (device_name, fingerprint, registered_by) VALUES ($1, $2, $3) RETURNING id, registered_at`
-	return r.db.Pool.QueryRow(ctx, query, device.DeviceName, device.Fingerprint, device.RegisteredBy).Scan(&device.ID, &device.RegisteredAt)
+	query := `INSERT INTO devices (device_name, fingerprint, registered_by, can_log, can_download, is_active) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, registered_at, can_log, can_download, is_active`
+	return r.db.Pool.QueryRow(ctx, query, device.DeviceName, device.Fingerprint, device.RegisteredBy, device.CanLog, device.CanDownload, device.IsActive).Scan(&device.ID, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
 }
 
 func (r *deviceRepository) GetDevices(ctx context.Context) ([]*models.Device, error) {
-	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, is_active FROM devices`
+	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active FROM devices`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -152,7 +157,7 @@ func (r *deviceRepository) GetDevices(ctx context.Context) ([]*models.Device, er
 	var devices []*models.Device
 	for rows.Next() {
 		device := &models.Device{}
-		err := rows.Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.IsActive)
+		err := rows.Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
 		if err != nil {
 			return nil, err
 		}
@@ -163,8 +168,63 @@ func (r *deviceRepository) GetDevices(ctx context.Context) ([]*models.Device, er
 
 func (r *deviceRepository) GetDeviceByFingerprint(ctx context.Context, fingerprint string) (*models.Device, error) {
 	device := &models.Device{}
-	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, is_active FROM devices WHERE fingerprint = $1 AND is_active = true`
-	err := r.db.Pool.QueryRow(ctx, query, fingerprint).Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.IsActive)
+	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active FROM devices WHERE fingerprint = $1`
+	err := r.db.Pool.QueryRow(ctx, query, fingerprint).Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
+	if err != nil {
+		return nil, err
+	}
+	return device, nil
+}
+
+func (r *deviceRepository) GetDeviceByID(ctx context.Context, id uuid.UUID) (*models.Device, error) {
+	device := &models.Device{}
+	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active FROM devices WHERE id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
+	if err != nil {
+		return nil, err
+	}
+	return device, nil
+}
+
+func (r *deviceRepository) UpdateDevice(ctx context.Context, id uuid.UUID, update *models.DeviceUpdate) (*models.Device, error) {
+	if update == nil {
+		return r.GetDeviceByID(ctx, id)
+	}
+
+	fields := []string{}
+	args := []interface{}{}
+	argPos := 1
+
+	if update.DeviceName != nil {
+		fields = append(fields, fmt.Sprintf("device_name = $%d", argPos))
+		args = append(args, *update.DeviceName)
+		argPos++
+	}
+	if update.CanLog != nil {
+		fields = append(fields, fmt.Sprintf("can_log = $%d", argPos))
+		args = append(args, *update.CanLog)
+		argPos++
+	}
+	if update.CanDownload != nil {
+		fields = append(fields, fmt.Sprintf("can_download = $%d", argPos))
+		args = append(args, *update.CanDownload)
+		argPos++
+	}
+	if update.IsActive != nil {
+		fields = append(fields, fmt.Sprintf("is_active = $%d", argPos))
+		args = append(args, *update.IsActive)
+		argPos++
+	}
+
+	if len(fields) == 0 {
+		return r.GetDeviceByID(ctx, id)
+	}
+
+	query := fmt.Sprintf("UPDATE devices SET %s WHERE id = $%d RETURNING id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active", strings.Join(fields, ", "), argPos)
+	args = append(args, id)
+
+	device := &models.Device{}
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
 	if err != nil {
 		return nil, err
 	}
@@ -254,4 +314,158 @@ func (r *logRepository) GetLogByID(ctx context.Context, id uuid.UUID) (*models.L
 		return nil, err
 	}
 	return log, nil
+}
+
+func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.DashboardStats, error) {
+	stats := &models.DashboardStats{
+		ActionBreakdown: make(map[string]int),
+		StationActivity: []models.StationActivity{},
+	}
+
+	// Get today's date
+	today := time.Now().Format("2006-01-02")
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+
+	// Total logs today
+	err := r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM logs WHERE DATE(created_at) = $1", today).Scan(&stats.TotalLogsToday)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total logs today: %w", err)
+	}
+
+	// Logs yesterday
+	err = r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM logs WHERE DATE(created_at) = $1", yesterday).Scan(&stats.LogsYesterday)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get logs yesterday: %w", err)
+	}
+
+	// Total stations
+	err = r.db.Pool.QueryRow(ctx, "SELECT COUNT(*) FROM stations").Scan(&stats.TotalStations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get total stations: %w", err)
+	}
+
+	// Active stations (stations with logs today)
+	err = r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT station_id)
+		FROM logs
+		WHERE DATE(created_at) = $1
+	`, today).Scan(&stats.ActiveStations)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get active stations: %w", err)
+	}
+
+	// Operators on duty (unique operators with logs today)
+	err = r.db.Pool.QueryRow(ctx, `
+		SELECT COUNT(DISTINCT created_by)
+		FROM logs
+		WHERE DATE(created_at) = $1
+	`, today).Scan(&stats.OperatorsOnDuty)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get operators on duty: %w", err)
+	}
+
+	// Last entry info
+	var lastEntryTime time.Time
+	var lastEntryStationID uuid.UUID
+	var lastEntryOperator string
+	err = r.db.Pool.QueryRow(ctx, `
+		SELECT created_at, station_id, operator_name
+		FROM logs
+		ORDER BY created_at DESC
+		LIMIT 1
+	`).Scan(&lastEntryTime, &lastEntryStationID, &lastEntryOperator)
+	if err == nil {
+		stats.LastEntryTime = lastEntryTime.Format("15:04")
+		stats.LastEntryOperator = lastEntryOperator
+
+		// Get station name
+		var stationName string
+		err = r.db.Pool.QueryRow(ctx, "SELECT name FROM stations WHERE id = $1", lastEntryStationID).Scan(&stationName)
+		if err == nil {
+			stats.LastEntryStation = stationName
+		}
+	}
+
+	// Action breakdown
+	actionRows, err := r.db.Pool.Query(ctx, `
+		SELECT action, COUNT(*) as count
+		FROM logs
+		WHERE DATE(created_at) = $1
+		GROUP BY action
+	`, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get action breakdown: %w", err)
+	}
+	defer actionRows.Close()
+
+	for actionRows.Next() {
+		var action string
+		var count int
+		err := actionRows.Scan(&action, &count)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan action breakdown: %w", err)
+		}
+		stats.ActionBreakdown[action] = count
+	}
+
+	// Station activity
+	stationRows, err := r.db.Pool.Query(ctx, `
+		SELECT s.name, COUNT(l.id) as log_count
+		FROM stations s
+		LEFT JOIN logs l ON s.id = l.station_id AND DATE(l.created_at) = $1
+		GROUP BY s.id, s.name
+		ORDER BY log_count DESC
+	`, today)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get station activity: %w", err)
+	}
+	defer stationRows.Close()
+
+	for stationRows.Next() {
+		var stationName string
+		var logCount int
+		err := stationRows.Scan(&stationName, &logCount)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan station activity: %w", err)
+		}
+
+		status := "low"
+		if logCount >= 10 {
+			status = "high"
+		} else if logCount >= 5 {
+			status = "medium"
+		}
+
+		stats.StationActivity = append(stats.StationActivity, models.StationActivity{
+			StationName: stationName,
+			LogCount:    logCount,
+			Status:      status,
+		})
+	}
+
+	// Recent logs (last 10)
+	recentRows, err := r.db.Pool.Query(ctx, `
+		SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name as station_name
+		FROM logs l
+		JOIN stations s ON l.station_id = s.id
+		ORDER BY l.created_at DESC
+		LIMIT 10
+	`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get recent logs: %w", err)
+	}
+	defer recentRows.Close()
+
+	var recentLogs []*models.Log
+	for recentRows.Next() {
+		log := &models.Log{}
+		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan recent log: %w", err)
+		}
+		recentLogs = append(recentLogs, log)
+	}
+	stats.RecentLogs = recentLogs
+
+	return stats, nil
 }

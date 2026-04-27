@@ -26,7 +26,16 @@ type Device struct {
 	Fingerprint  string    `json:"fingerprint" db:"fingerprint"`
 	RegisteredBy uuid.UUID `json:"registered_by" db:"registered_by"`
 	RegisteredAt time.Time `json:"registered_at" db:"registered_at"`
+	CanLog       bool      `json:"can_log" db:"can_log"`
+	CanDownload  bool      `json:"can_download" db:"can_download"`
 	IsActive     bool      `json:"is_active" db:"is_active"`
+}
+
+type DeviceUpdate struct {
+	DeviceName  *string `json:"device_name"`
+	CanLog      *bool   `json:"can_log"`
+	CanDownload *bool   `json:"can_download"`
+	IsActive    *bool   `json:"is_active"`
 }
 
 type Log struct {
@@ -41,4 +50,25 @@ type Log struct {
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 	DeviceID     uuid.UUID `json:"device_id" db:"device_id"`
+	StationName string `json:"station_name"`
+}
+
+type DashboardStats struct {
+	TotalLogsToday     int                    `json:"total_logs_today"`
+	LogsYesterday      int                    `json:"logs_yesterday"`
+	ActiveStations     int                    `json:"active_stations"`
+	TotalStations      int                    `json:"total_stations"`
+	OperatorsOnDuty    int                    `json:"operators_on_duty"`
+	LastEntryTime      string                 `json:"last_entry_time"`
+	LastEntryStation   string                 `json:"last_entry_station"`
+	LastEntryOperator  string                 `json:"last_entry_operator"`
+	ActionBreakdown    map[string]int         `json:"action_breakdown"`
+	StationActivity    []StationActivity      `json:"station_activity"`
+	RecentLogs         []*Log                 `json:"recent_logs"`
+}
+
+type StationActivity struct {
+	StationName string `json:"station_name"`
+	LogCount    int    `json:"log_count"`
+	Status      string `json:"status"` // "high", "medium", "low" based on activity
 }

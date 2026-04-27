@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/csv"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,12 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo db.UserRepository
+	userRepo   db.UserRepository
+	deviceRepo db.DeviceRepository
+}
+
+type DashboardHandler struct {
+	logRepo db.LogRepository
 }
 
 type LogHandler struct {
@@ -36,8 +42,8 @@ type UserHandler struct {
 
 type STTHandler struct{}
 
-func NewAuthHandler(userRepo db.UserRepository) *AuthHandler {
-	return &AuthHandler{userRepo: userRepo}
+func NewAuthHandler(userRepo db.UserRepository, deviceRepo db.DeviceRepository) *AuthHandler {
+	return &AuthHandler{userRepo: userRepo, deviceRepo: deviceRepo}
 }
 
 func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository) *LogHandler {
@@ -58,6 +64,10 @@ func NewUserHandler(userRepo db.UserRepository) *UserHandler {
 
 func NewSTTHandler() *STTHandler {
 	return &STTHandler{}
+}
+
+func NewDashboardHandler(logRepo db.LogRepository) *DashboardHandler {
+	return &DashboardHandler{logRepo: logRepo}
 }
 
 // Login authenticates a user with email and password
@@ -117,11 +127,67 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		})
 	}
 
+	deviceFingerprint := strings.TrimSpace(c.Get("X-Device-ID"))
+	deviceName := strings.TrimSpace(c.Get("X-Device-Name"))
+	canLog := false
+	canDownload := false
+	isRegistered := false
+	deviceID := ""
+	fingerprintValue := ""
+	isActive := false
+
+	if deviceFingerprint != "" {
+		fingerprintValue = deviceFingerprint
+		device, err := h.deviceRepo.GetDeviceByFingerprint(c.Context(), deviceFingerprint)
+		if err != nil {
+			if deviceName == "" {
+				deviceName = "Auto-registered device"
+			}
+			autoDevice := &models.Device{
+				DeviceName:   deviceName,
+				Fingerprint:  deviceFingerprint,
+				RegisteredBy: user.ID,
+				CanLog:       false,
+				CanDownload:  false,
+				IsActive:     true,
+			}
+			if err := h.deviceRepo.CreateDevice(c.Context(), autoDevice); err != nil {
+				fmt.Printf("failed to auto-register device: %v\n", err)
+			} else {
+				deviceID = autoDevice.ID.String()
+				isRegistered = true
+				isActive = autoDevice.IsActive
+			}
+		} else {
+			deviceID = device.ID.String()
+			isRegistered = true
+			if device.IsActive {
+				canLog = device.CanLog
+				canDownload = device.CanDownload
+				isActive = true
+			}
+		}
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
 			"access_token":  accessToken,
 			"refresh_token": refreshToken,
+			"user": fiber.Map{
+				"id":    user.ID,
+				"name":  user.Name,
+				"email": user.Email,
+				"role":  user.Role,
+			},
+			"device": fiber.Map{
+				"id":            deviceID,
+				"fingerprint":   fingerprintValue,
+				"can_log":       canLog,
+				"can_download":  canDownload,
+				"is_registered": isRegistered,
+				"is_active":     isActive,
+			},
 		},
 	})
 }
@@ -285,12 +351,41 @@ func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
 // @Failure 500 {object} map[string]interface{} "Internal server error"
 // @Router /logs [post]
 func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
-	var log models.Log
-	if err := c.BodyParser(&log); err != nil {
+	type CreateLogRequest struct {
+		LogDate      string    `json:"log_date"`
+		LogTime      string    `json:"log_time"`
+		StationID    uuid.UUID `json:"station_id"`
+		OperatorName string    `json:"operator_name"`
+		Action       string    `json:"action"`
+		Event        string    `json:"event"`
+	}
+
+	var req CreateLogRequest
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "Invalid request body",
 		})
+	}
+
+	logDate, err := time.Parse(time.RFC3339, req.LogDate)
+	if err != nil {
+		logDate, err = time.Parse("2006-01-02", req.LogDate)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid log_date format, expected RFC3339 or YYYY-MM-DD",
+			})
+		}
+	}
+
+	log := models.Log{
+		LogDate:      logDate,
+		LogTime:      req.LogTime,
+		StationID:    req.StationID,
+		OperatorName: req.OperatorName,
+		Action:       req.Action,
+		Event:        req.Event,
 	}
 
 	userID := c.Locals("user_id").(uuid.UUID)
@@ -338,12 +433,41 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 		})
 	}
 
-	var log models.Log
-	if err := c.BodyParser(&log); err != nil {
+	type UpdateLogRequest struct {
+		LogDate      string    `json:"log_date"`
+		LogTime      string    `json:"log_time"`
+		StationID    uuid.UUID `json:"station_id"`
+		OperatorName string    `json:"operator_name"`
+		Action       string    `json:"action"`
+		Event        string    `json:"event"`
+	}
+
+	var req UpdateLogRequest
+	if err := c.BodyParser(&req); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "Invalid request body",
 		})
+	}
+
+	logDate, err := time.Parse(time.RFC3339, req.LogDate)
+	if err != nil {
+		logDate, err = time.Parse("2006-01-02", req.LogDate)
+		if err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid log_date format, expected RFC3339 or YYYY-MM-DD",
+			})
+		}
+	}
+
+	log := models.Log{
+		LogDate:      logDate,
+		LogTime:      req.LogTime,
+		StationID:    req.StationID,
+		OperatorName: req.OperatorName,
+		Action:       req.Action,
+		Event:        req.Event,
 	}
 
 	existingLog, err := h.logRepo.GetLogByID(c.Context(), id)
@@ -598,6 +722,67 @@ func (h *DeviceHandler) CreateDevice(c *fiber.Ctx) error {
 	})
 }
 
+// UpdateDevice updates a device by ID
+// @Summary Update device
+// @Description Updates device fields using partial updates (admin only)
+// @Tags devices
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path string true "Device ID (UUID)"
+// @Param device body object true "Device update data"
+// @Success 200 {object} map[string]interface{} "Updated device"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden (admin only)"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /devices/{id} [put]
+func (h *DeviceHandler) UpdateDevice(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid device ID",
+		})
+	}
+
+	type UpdateDeviceRequest struct {
+		DeviceName  *string `json:"device_name"`
+		CanLog      *bool   `json:"can_log"`
+		CanDownload *bool   `json:"can_download"`
+		IsActive    *bool   `json:"is_active"`
+	}
+
+	var req UpdateDeviceRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	update := &models.DeviceUpdate{
+		DeviceName:  req.DeviceName,
+		CanLog:      req.CanLog,
+		CanDownload: req.CanDownload,
+		IsActive:    req.IsActive,
+	}
+
+	device, err := h.deviceRepo.UpdateDevice(c.Context(), id, update)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update device",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    device,
+	})
+}
+
 // DeactivateDevice deactivates a device
 // @Summary Deactivate device
 // @Description Deactivates a device by ID (admin only)
@@ -832,5 +1017,30 @@ func (h *STTHandler) Transcribe(c *fiber.Ctx) error {
 		"data": fiber.Map{
 			"transcription": transcription,
 		},
+	})
+}
+
+// GetDashboardStats retrieves dashboard statistics
+// @Summary Get dashboard statistics
+// @Description Retrieves comprehensive dashboard statistics including logs, stations, operators, and activity data
+// @Tags dashboard
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]interface{} "Dashboard statistics"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /dashboard/stats [get]
+func (h *DashboardHandler) GetDashboardStats(c *fiber.Ctx) error {
+	stats, err := h.logRepo.GetDashboardStats(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to get dashboard statistics",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    stats,
 	})
 }

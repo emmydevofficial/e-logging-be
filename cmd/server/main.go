@@ -55,18 +55,24 @@ func main() {
 	logRepo := db.NewLogRepository(database)
 
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(userRepo)
+	authHandler := handlers.NewAuthHandler(userRepo, deviceRepo)
 	logHandler := handlers.NewLogHandler(logRepo, deviceRepo)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	deviceHandler := handlers.NewDeviceHandler(deviceRepo)
 	userHandler := handlers.NewUserHandler(userRepo)
 	sttHandler := handlers.NewSTTHandler()
+	dashboardHandler := handlers.NewDashboardHandler(logRepo)
 
 	// Initialize Fiber app
 	app := fiber.New()
 
 	// Middleware
-	app.Use(cors.New())
+	app.Use(cors.New(cors.Config{
+		AllowOrigins: "http://localhost:5173, http://localhost:3000, http://127.0.0.1:5173",
+		AllowMethods: "GET,POST,PUT,DELETE,OPTIONS",
+		AllowHeaders: "Content-Type,Authorization,X-Device-ID,X-Device-Name",
+		MaxAge:       3600,
+	}))
 
 	// Auth routes
 	authGroup := app.Group("/api/auth")
@@ -101,6 +107,7 @@ func main() {
 	devicesGroup := api.Group("/devices")
 	devicesGroup.Get("/", middleware.RoleMiddleware("admin"), deviceHandler.GetDevices)
 	devicesGroup.Post("/", middleware.RoleMiddleware("admin"), deviceHandler.CreateDevice)
+	devicesGroup.Put("/:id", middleware.RoleMiddleware("admin"), deviceHandler.UpdateDevice)
 	devicesGroup.Delete("/:id", middleware.RoleMiddleware("admin"), deviceHandler.DeactivateDevice)
 
 	// Users
@@ -110,6 +117,10 @@ func main() {
 
 	// STT
 	api.Post("/stt", sttHandler.Transcribe)
+
+	// Dashboard
+	dashboardGroup := api.Group("/dashboard")
+	dashboardGroup.Get("/stats", dashboardHandler.GetDashboardStats)
 
 	// Swagger documentation
 	app.Get("/swagger/*", fiberSwagger.WrapHandler)

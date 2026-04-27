@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>StationLog — E-Logbook UI Design</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'IBM Plex Sans', sans-serif; background: #0f1117; color: #e2e8f0; margin: 0; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  /* Nav tabs */
+  .screen { display: none; }
+  .screen.active { display: flex; }
+
+  /* Status pill */
+  .pill-green { background: #052e1c; color: #34d399; border: 1px solid #065f46; }
+  .pill-amber { background: #2d1a00; color: #fbbf24; border: 1px solid #78350f; }
+  .pill-blue  { background: #0c1a2e; color: #60a5fa; border: 1px solid #1e40af; }
+  .pill-red   { background: #2d0a0a; color: #f87171; border: 1px solid #7f1d1d; }
+
+  /* Action type styles */
+  .action-reported  { color: #60a5fa; }
+  .action-instructed { color: #a78bfa; }
+  .action-approval  { color: #34d399; }
+  .action-misc      { color: #fb923c; }
+
+  /* Log row hover */
+  .log-row { border-left: 3px solid transparent; transition: all 0.15s; cursor: pointer; }
+  .log-row:hover { border-left-color: #3b82f6; background: #161b27; }
+  .log-row.selected { border-left-color: #60a5fa; background: #0c1a2e; }
+
+  /* Input fields */
+  .field { background: #161b27; border: 1px solid #2a3245; color: #e2e8f0; border-radius: 6px; padding: 10px 14px; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; width: 100%; outline: none; transition: border-color 0.15s; }
+  .field:focus { border-color: #3b82f6; }
+  .field::placeholder { color: #4a5568; }
+  select.field option { background: #161b27; }
+
+  /* Buttons */
+  .btn-primary { background: #2563eb; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-size: 14px; font-weight: 500; cursor: pointer; transition: background 0.15s; font-family: 'IBM Plex Sans', sans-serif; }
+  .btn-primary:hover { background: #1d4ed8; }
+  .btn-ghost { background: transparent; color: #94a3b8; border: 1px solid #2a3245; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; transition: all 0.15s; font-family: 'IBM Plex Sans', sans-serif; }
+  .btn-ghost:hover { border-color: #4a5568; color: #e2e8f0; }
+  .btn-danger { background: transparent; color: #f87171; border: 1px solid #7f1d1d; padding: 8px 16px; border-radius: 6px; font-size: 13px; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; }
+
+  /* Sidebar nav items */
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-radius: 6px; cursor: pointer; color: #64748b; font-size: 14px; font-weight: 500; transition: all 0.15s; text-decoration: none; }
+  .nav-item:hover { background: #161b27; color: #94a3b8; }
+  .nav-item.active { background: #0c1a2e; color: #60a5fa; }
+  .nav-item svg { width: 18px; height: 18px; flex-shrink: 0; }
+
+  /* Card */
+  .card { background: #161b27; border: 1px solid #1e2a3a; border-radius: 10px; }
+
+  /* Stat card */
+  .stat-card { background: #161b27; border: 1px solid #1e2a3a; border-radius: 10px; padding: 20px; }
+
+  /* Recording animation */
+  @keyframes pulse-rec { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.5; transform: scale(1.3); } }
+  .recording-dot { animation: pulse-rec 1s ease-in-out infinite; }
+
+  /* Waveform bars */
+  @keyframes wave { 0%, 100% { height: 4px; } 50% { height: 20px; } }
+  .wave-bar { width: 3px; border-radius: 2px; background: #3b82f6; animation: wave 0.8s ease-in-out infinite; }
+  .wave-bar:nth-child(2) { animation-delay: 0.1s; }
+  .wave-bar:nth-child(3) { animation-delay: 0.2s; }
+  .wave-bar:nth-child(4) { animation-delay: 0.3s; }
+  .wave-bar:nth-child(5) { animation-delay: 0.4s; }
+  .wave-bar:nth-child(6) { animation-delay: 0.3s; }
+  .wave-bar:nth-child(7) { animation-delay: 0.2s; }
+  .wave-bar:nth-child(8) { animation-delay: 0.1s; }
+
+  /* Top ticker */
+  @keyframes ticker { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
+  .ticker-inner { display: flex; animation: ticker 30s linear infinite; white-space: nowrap; }
+
+  /* Fade in */
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-up { animation: fadeUp 0.25s ease both; }
+
+  /* Modal */
+  .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 100; backdrop-filter: blur(2px); }
+  .modal { background: #161b27; border: 1px solid #2a3245; border-radius: 12px; padding: 28px; width: 560px; max-width: 95vw; }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 4px; height: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #2a3245; border-radius: 4px; }
+
+  /* Mobile bottom nav */
+  .mobile-nav-item { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 10px; color: #4a5568; cursor: pointer; padding: 8px 12px; border-radius: 8px; transition: color 0.15s; flex: 1; }
+  .mobile-nav-item.active { color: #60a5fa; }
+  .mobile-nav-item svg { width: 22px; height: 22px; }
+
+  /* Login screen */
+  .login-bg { background: radial-gradient(ellipse at 20% 50%, #0f2040 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, #0a1628 0%, transparent 50%), #0f1117; }
+
+  /* Toggle switch */
+  .toggle { position: relative; width: 44px; height: 24px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider { position: absolute; inset: 0; background: #2a3245; border-radius: 24px; cursor: pointer; transition: background 0.2s; }
+  .toggle-slider:before { content: ''; position: absolute; width: 18px; height: 18px; left: 3px; top: 3px; background: white; border-radius: 50%; transition: transform 0.2s; }
+  .toggle input:checked + .toggle-slider { background: #2563eb; }
+  .toggle input:checked + .toggle-slider:before { transform: translateX(20px); }
+
+  /* Tooltip */
+  .tooltip { position: relative; }
+  .tooltip:hover .tooltip-text { display: block; }
+  .tooltip-text { display: none; position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: #2a3245; color: #e2e8f0; font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; z-index: 10; }
+
+  /* Sidebar resize handle */
+  .sidebar { width: 220px; flex-shrink: 0; }
+
+  /* View mode button group */
+  .view-btn { padding: 6px 12px; font-size: 12px; border: 1px solid #2a3245; background: transparent; color: #64748b; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; transition: all 0.15s; }
+  .view-btn.active { background: #0c1a2e; color: #60a5fa; border-color: #1e3a5f; }
+  .view-btn:first-child { border-radius: 6px 0 0 6px; }
+  .view-btn:last-child { border-radius: 0 6px 6px 0; }
+  .view-btn:not(:first-child) { border-left: none; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ─── TOP NAVIGATION (Design Selector) ─── -->
+<div style="background:#090c13; border-bottom: 1px solid #1e2a3a; position: sticky; top: 0; z-index: 50;">
+  <div style="max-width: 1400px; margin: 0 auto; padding: 0 16px; display: flex; align-items: center; gap: 0; overflow-x: auto;">
+    <div class="mono" style="color:#3b82f6; font-size: 13px; font-weight: 600; padding: 14px 20px 14px 0; border-right: 1px solid #1e2a3a; white-space: nowrap; margin-right: 16px;">STATIONLOG UI</div>
+    <div style="display: flex; gap: 4px; padding: 8px 0;">
+      <button onclick="showScreen('login')" id="tab-login" class="view-btn active">Login</button>
+      <button onclick="showScreen('dashboard')" id="tab-dashboard" class="view-btn">Dashboard</button>
+      <button onclick="showScreen('log-list')" id="tab-log-list" class="view-btn">Log List</button>
+      <button onclick="showScreen('create-log')" id="tab-create-log" class="view-btn">Create Log</button>
+      <button onclick="showScreen('mobile')" id="tab-mobile" class="view-btn">Mobile View</button>
+      <button onclick="showScreen('admin')" id="tab-admin" class="view-btn">Admin Panel</button>
+    </div>
+    <div style="margin-left: auto; padding-left: 16px; display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 11px; color: #4a5568;" class="mono">Built with Tailwind CSS</span>
+      <span class="pill-green mono" style="font-size: 10px; padding: 2px 8px; border-radius: 4px;">v3.x</span>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════ -->
+<!--  SCREEN 1 — LOGIN                       -->
+<!-- ════════════════════════════════════════ -->
+<div id="screen-login" class="screen active" style="min-height: calc(100vh - 49px); align-items: center; justify-content: center; padding: 40px 16px;" class="login-bg">
+  <div style="background: radial-gradient(ellipse at 20% 50%, #0f2040 0%, transparent 60%), radial-gradient(ellipse at 80% 20%, #0a1628 0%, transparent 50%); position: absolute; inset: 0; pointer-events: none;"></div>
+  <div style="display: flex; flex-direction: column; align-items: center; gap: 32px; width: 100%; max-width: 420px; position: relative;">
+    <!-- Logo -->
+    <div style="text-align: center;">
+      <div style="display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 8px;">
+        <div style="width: 40px; height: 40px; background: #2563eb; border-radius: 10px; display: flex; align-items: center; justify-content: center;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:22px;height:22px"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        </div>
+        <div>
+          <div style="font-size: 22px; font-weight: 600; letter-spacing: -0.5px;">StationLog</div>
+          <div class="mono" style="font-size: 10px; color: #4a5568; letter-spacing: 2px;">ELECTRONIC LOGBOOK SYSTEM</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Login Card -->
+    <div class="card" style="width: 100%; padding: 32px;">
+      <div style="font-size: 16px; font-weight: 600; margin-bottom: 4px;">Sign in to your account</div>
+      <div style="font-size: 13px; color: #64748b; margin-bottom: 28px;">Enter your credentials to access the logbook</div>
+
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <div>
+          <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500;">EMAIL ADDRESS</label>
+          <input class="field" type="email" placeholder="operator@company.com" value="john.doe@ops.com"/>
+        </div>
+        <div>
+          <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500;">PASSWORD</label>
+          <input class="field" type="password" placeholder="••••••••" value="••••••••"/>
+        </div>
+        <div style="display: flex; align-items: center; justify-content: space-between;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: #64748b;">
+            <input type="checkbox" style="accent-color: #2563eb;" checked/> Remember me
+          </label>
+          <a href="#" style="font-size: 13px; color: #3b82f6; text-decoration: none;">Forgot password?</a>
+        </div>
+        <button class="btn-primary" style="width: 100%; padding: 12px; font-size: 15px;" onclick="showScreen('dashboard')">
+          Sign In →
+        </button>
+      </div>
+
+      <div style="margin-top: 24px; padding-top: 20px; border-top: 1px solid #1e2a3a;">
+        <div style="font-size: 12px; color: #4a5568; margin-bottom: 12px; text-align: center;">Quick access — click to switch role</div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+          <button class="btn-ghost" style="font-size: 12px; padding: 8px; text-align: center;" onclick="showScreen('dashboard')">
+            <span class="pill-red" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-family: monospace;">ADMIN</span>
+          </button>
+          <button class="btn-ghost" style="font-size: 12px; padding: 8px; text-align: center;" onclick="showScreen('create-log')">
+            <span class="pill-blue" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-family: monospace;">OPERATOR</span>
+          </button>
+          <button class="btn-ghost" style="font-size: 12px; padding: 8px; text-align: center;" onclick="showScreen('log-list')">
+            <span class="pill-amber" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; font-family: monospace;">DOWNLOADER</span>
+          </button>
+          <button class="btn-ghost" style="font-size: 12px; padding: 8px; text-align: center;" onclick="showScreen('log-list')">
+            <span style="background:#1a1a2e; color:#a78bfa; border: 1px solid #3730a3; font-size: 10px; padding: 1px 6px; border-radius: 3px; font-family: monospace;">VIEWER</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Device notice for company app -->
+    <div style="display: flex; align-items: center; gap: 8px; background: #052e1c; border: 1px solid #065f46; padding: 10px 16px; border-radius: 8px; width: 100%;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="2" style="width:16px;height:16px;flex-shrink:0"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span style="font-size: 12px; color: #34d399;">Device verified — company device <span class="mono">DEV-0042</span></span>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<!--  SCREEN 2 — DASHBOARD                   -->
+<!-- ════════════════════════════════════════ -->
+<div id="screen-dashboard" class="screen" style="min-height: calc(100vh - 49px); flex-direction: row;">
+  <!-- Sidebar -->
+  <div class="sidebar" style="background: #0d1117; border-right: 1px solid #1e2a3a; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; min-height: calc(100vh - 49px);">
+    <div style="padding: 0 8px; margin-bottom: 16px;">
+      <div style="font-size: 11px; color: #3b82f6; font-weight: 600;" class="mono">STATIONLOG</div>
+      <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">John Doe · Admin</div>
+    </div>
+    <a class="nav-item active" onclick="showScreen('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item" onclick="showScreen('log-list')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Log Entries
+    </a>
+    <a class="nav-item" onclick="showScreen('create-log')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      New Entry
+    </a>
+    <a class="nav-item" onclick="showScreen('admin')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Users & Devices
+    </a>
+    <div style="border-top: 1px solid #1e2a3a; margin: 8px 0;"></div>
+    <a class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14M4.93 4.93a10 10 0 0 0 0 14.14"/></svg>
+      Stations
+    </a>
+    <a class="nav-item">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      Settings
+    </a>
+    <div style="margin-top: auto; padding: 10px 8px 0;">
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <div style="width: 32px; height: 32px; border-radius: 50%; background: #1e3a5f; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; color: #60a5fa;">JD</div>
+        <div>
+          <div style="font-size: 13px; font-weight: 500;">John Doe</div>
+          <div style="font-size: 11px; color: #4a5568;">Administrator</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <div style="flex: 1; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 24px;">
+    <!-- Header -->
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <div>
+        <h1 style="font-size: 22px; font-weight: 600; margin: 0 0 4px;">Operations Dashboard</h1>
+        <div class="mono" style="font-size: 12px; color: #4a5568;" id="dash-time">MON 2025-01-20 · 14:32:07</div>
+      </div>
+      <button class="btn-primary" onclick="showScreen('create-log')" style="display: flex; align-items: center; gap: 8px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:16px;height:16px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        New Log Entry
+      </button>
+    </div>
+
+    <!-- Stats row -->
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+      <div class="stat-card">
+        <div style="font-size: 11px; color: #4a5568; font-weight: 500; margin-bottom: 10px;" class="mono">TOTAL LOGS TODAY</div>
+        <div style="font-size: 32px; font-weight: 600; color: #e2e8f0;">47</div>
+        <div style="font-size: 12px; color: #34d399; margin-top: 4px;">↑ 12 from yesterday</div>
+      </div>
+      <div class="stat-card">
+        <div style="font-size: 11px; color: #4a5568; font-weight: 500; margin-bottom: 10px;" class="mono">ACTIVE STATIONS</div>
+        <div style="font-size: 32px; font-weight: 600; color: #e2e8f0;">8</div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 4px;">of 12 stations online</div>
+      </div>
+      <div class="stat-card">
+        <div style="font-size: 11px; color: #4a5568; font-weight: 500; margin-bottom: 10px;" class="mono">OPERATORS ON DUTY</div>
+        <div style="font-size: 32px; font-weight: 600; color: #e2e8f0;">5</div>
+        <div style="font-size: 12px; color: #64748b; margin-top: 4px;">Across all stations</div>
+      </div>
+      <div class="stat-card">
+        <div style="font-size: 11px; color: #4a5568; font-weight: 500; margin-bottom: 10px;" class="mono">LAST ENTRY</div>
+        <div style="font-size: 32px; font-weight: 600; color: #e2e8f0;" class="mono">14:28</div>
+        <div style="font-size: 12px; color: #fbbf24; margin-top: 4px;">Station Alpha · OPR-02</div>
+      </div>
+    </div>
+
+    <!-- Action type breakdown + Recent logs -->
+    <div style="display: grid; grid-template-columns: 300px 1fr; gap: 20px;">
+      <!-- Action breakdown -->
+      <div class="card" style="padding: 20px;">
+        <div style="font-size: 13px; font-weight: 600; margin-bottom: 16px; color: #94a3b8;" class="mono">ACTION BREAKDOWN</div>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span class="action-reported">Reported that</span><span class="mono">19</span>
+            </div>
+            <div style="height: 4px; background: #1e2a3a; border-radius: 2px;"><div style="width: 40%; height: 100%; background: #3b82f6; border-radius: 2px;"></div></div>
+          </div>
+          <div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span class="action-instructed">Was instructed to</span><span class="mono">14</span>
+            </div>
+            <div style="height: 4px; background: #1e2a3a; border-radius: 2px;"><div style="width: 30%; height: 100%; background: #8b5cf6; border-radius: 2px;"></div></div>
+          </div>
+          <div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span class="action-approval">Was given approval</span><span class="mono">8</span>
+            </div>
+            <div style="height: 4px; background: #1e2a3a; border-radius: 2px;"><div style="width: 17%; height: 100%; background: #10b981; border-radius: 2px;"></div></div>
+          </div>
+          <div>
+            <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+              <span class="action-misc">Miscellaneous</span><span class="mono">6</span>
+            </div>
+            <div style="height: 4px; background: #1e2a3a; border-radius: 2px;"><div style="width: 13%; height: 100%; background: #f97316; border-radius: 2px;"></div></div>
+          </div>
+        </div>
+
+        <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #1e2a3a;">
+          <div style="font-size: 11px; color: #4a5568; margin-bottom: 10px; font-weight: 500;" class="mono">STATION ACTIVITY</div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; font-size: 12px; align-items: center;">
+              <span style="color: #94a3b8;">Station Alpha</span>
+              <span class="pill-green mono" style="font-size: 10px; padding: 2px 6px; border-radius: 3px;">12 logs</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; align-items: center;">
+              <span style="color: #94a3b8;">Station Bravo</span>
+              <span class="pill-blue mono" style="font-size: 10px; padding: 2px 6px; border-radius: 3px;">9 logs</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; align-items: center;">
+              <span style="color: #94a3b8;">Control Room</span>
+              <span class="pill-blue mono" style="font-size: 10px; padding: 2px 6px; border-radius: 3px;">8 logs</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; font-size: 12px; align-items: center;">
+              <span style="color: #94a3b8;">Station Delta</span>
+              <span class="pill-amber mono" style="font-size: 10px; padding: 2px 6px; border-radius: 3px;">7 logs</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Recent log stream -->
+      <div class="card" style="padding: 20px; overflow: hidden;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+          <div style="font-size: 13px; font-weight: 600; color: #94a3b8;" class="mono">RECENT LOG STREAM</div>
+          <button class="btn-ghost" style="font-size: 12px; padding: 5px 12px;" onclick="showScreen('log-list')">View All →</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 2px;">
+          <!-- Log entries -->
+          <div class="log-row selected" style="padding: 12px 14px; border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+              <span class="mono" style="font-size: 11px; color: #4a5568;">2025-01-20 · 14:28</span>
+              <span class="pill-blue" style="font-size: 10px; padding: 1px 7px; border-radius: 3px;">Station Alpha</span>
+            </div>
+            <div style="font-size: 13px; margin-bottom: 3px;"><span class="action-reported">Reported that</span> <span style="color: #e2e8f0;">Generator 2 fuel level dropped below 30% threshold. Refueling scheduled for 16:00.</span></div>
+            <div style="font-size: 11px; color: #4a5568;">Opr: Samuel Adeyemi · <span class="mono">Logged 14:28:43</span></div>
+          </div>
+          <div class="log-row" style="padding: 12px 14px; border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+              <span class="mono" style="font-size: 11px; color: #4a5568;">2025-01-20 · 13:55</span>
+              <span class="pill-green" style="font-size: 10px; padding: 1px 7px; border-radius: 3px;">Control Room</span>
+            </div>
+            <div style="font-size: 13px; margin-bottom: 3px;"><span class="action-approval">Was given approval</span> <span style="color: #e2e8f0;">to proceed with scheduled maintenance on Pump Unit B. Duration: 2 hours.</span></div>
+            <div style="font-size: 11px; color: #4a5568;">Opr: Fatima Bello · <span class="mono">Logged 13:55:12</span></div>
+          </div>
+          <div class="log-row" style="padding: 12px 14px; border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+              <span class="mono" style="font-size: 11px; color: #4a5568;">2025-01-20 · 13:40</span>
+              <span style="background:#1a0a2e;color:#c4b5fd;border:1px solid #3730a3;font-size:10px;padding:1px 7px;border-radius:3px;">Station Bravo</span>
+            </div>
+            <div style="font-size: 13px; margin-bottom: 3px;"><span class="action-instructed">Was instructed to</span> <span style="color: #e2e8f0;">increase monitoring frequency on pressure sensor P-14 from 30min to 15min intervals.</span></div>
+            <div style="font-size: 11px; color: #4a5568;">Opr: Chris Okafor · <span class="mono">Logged 13:42:07</span></div>
+          </div>
+          <div class="log-row" style="padding: 12px 14px; border-radius: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+              <span class="mono" style="font-size: 11px; color: #4a5568;">2025-01-20 · 12:10</span>
+              <span class="pill-amber" style="font-size: 10px; padding: 1px 7px; border-radius: 3px;">Station Delta</span>
+            </div>
+            <div style="font-size: 13px; margin-bottom: 3px;"><span class="action-misc">Miscellaneous</span> <span style="color: #e2e8f0;">Site visit from HSE inspector. Facility tour completed without incident. Report pending.</span></div>
+            <div style="font-size: 11px; color: #4a5568;">Opr: Grace Nwosu · <span class="mono">Logged 12:13:55</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<!--  SCREEN 3 — LOG LIST                    -->
+<!-- ════════════════════════════════════════ -->
+<div id="screen-log-list" class="screen" style="min-height: calc(100vh - 49px); flex-direction: row;">
+  <!-- Same sidebar pattern -->
+  <div class="sidebar" style="background: #0d1117; border-right: 1px solid #1e2a3a; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; min-height: calc(100vh - 49px);">
+    <div style="padding: 0 8px; margin-bottom: 16px;">
+      <div style="font-size: 11px; color: #3b82f6; font-weight: 600;" class="mono">STATIONLOG</div>
+      <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">John Doe · Operator</div>
+    </div>
+    <a class="nav-item" onclick="showScreen('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Log Entries
+    </a>
+    <a class="nav-item" onclick="showScreen('create-log')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      New Entry
+    </a>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 20px;">
+    <!-- Header + controls -->
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+      <div>
+        <h1 style="font-size: 22px; font-weight: 600; margin: 0 0 4px;">Log Entries</h1>
+        <div style="font-size: 13px; color: #64748b;">247 entries · filtered by last 7 days</div>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+        <!-- Sort toggle -->
+        <div>
+          <div style="font-size: 10px; color: #4a5568; margin-bottom: 4px; font-weight: 500;" class="mono">SORT BY</div>
+          <div style="display: flex;">
+            <button class="view-btn active" id="sort-event" onclick="toggleSort('event')">Event Time</button>
+            <button class="view-btn" id="sort-entry" onclick="toggleSort('entry')">Entry Time</button>
+          </div>
+        </div>
+        <button class="btn-ghost" style="display: flex; align-items: center; gap: 6px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px"><polyline points="6 9 12 15 18 9"/></svg>
+          Export PDF
+        </button>
+        <button class="btn-primary" onclick="showScreen('create-log')" style="display:flex;align-items:center;gap:6px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" style="width:14px;height:14px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          New Entry
+        </button>
+      </div>
+    </div>
+
+    <!-- Filters row -->
+    <div class="card" style="padding: 16px 20px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center;">
+      <div style="flex: 1; min-width: 200px;">
+        <input class="field" placeholder="🔍  Search entries..." style="padding: 9px 14px;"/>
+      </div>
+      <select class="field" style="width: 160px;">
+        <option>All Stations</option>
+        <option>Station Alpha</option>
+        <option>Station Bravo</option>
+        <option>Control Room</option>
+        <option>Station Delta</option>
+      </select>
+      <select class="field" style="width: 180px;">
+        <option>All Actions</option>
+        <option>Reported that</option>
+        <option>Was instructed to</option>
+        <option>Was given approval</option>
+        <option>Miscellaneous</option>
+      </select>
+      <input class="field" type="date" style="width: 150px;" value="2025-01-13"/>
+      <span style="color: #4a5568; font-size: 13px;">to</span>
+      <input class="field" type="date" style="width: 150px;" value="2025-01-20"/>
+      <button class="btn-ghost" style="font-size: 12px;">Clear</button>
+    </div>
+
+    <!-- Table header -->
+    <div class="card" style="overflow: hidden;">
+      <div style="display: grid; grid-template-columns: 140px 90px 160px 140px 1fr 100px; gap: 0; padding: 10px 16px; border-bottom: 1px solid #1e2a3a; background: #0d1117;">
+        <div class="mono" style="font-size: 11px; color: #4a5568; font-weight: 500;">DATE</div>
+        <div class="mono" style="font-size: 11px; color: #4a5568; font-weight: 500;">TIME</div>
+        <div class="mono" style="font-size: 11px; color: #4a5568; font-weight: 500;">STATION</div>
+        <div class="mono" style="font-size: 11px; color: #4a5568; font-weight: 500;">OPERATOR</div>
+        <div class="mono" style="font-size: 11px; color: #4a5568; font-weight: 500;">ENTRY</div>
+        <div class="mono" style="font-size: 11px; color: #4a5568; font-weight: 500;">ACTION</div>
+      </div>
+
+      <!-- Log rows -->
+      <div id="log-rows">
+        <div class="log-row selected" style="padding: 14px 16px; border-bottom: 1px solid #1e2a3a; display: grid; grid-template-columns: 140px 90px 160px 140px 1fr 100px; align-items: start; gap: 0;" onclick="openLogDetail()">
+          <div class="mono" style="font-size: 12px; color: #94a3b8; padding-top:2px;">2025-01-20</div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #60a5fa; padding-top:2px;">14:28</div>
+          <div style="padding-top:2px;"><span class="pill-blue" style="font-size:11px;padding:2px 8px;border-radius:4px;">Station Alpha</span></div>
+          <div style="font-size: 13px; padding-top:2px;">Samuel Adeyemi</div>
+          <div>
+            <div style="font-size: 13px; margin-bottom:2px;"><span class="action-reported">Reported that</span> Generator 2 fuel level dropped below 30% threshold. Refueling scheduled for 16:00.</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">Entry time: 14:28:43</div>
+          </div>
+          <div style="padding-top:2px; display:flex; gap:4px; flex-wrap:wrap;">
+            <button class="btn-ghost" style="font-size:11px;padding:3px 8px;" onclick="event.stopPropagation();openEditModal()">Edit</button>
+          </div>
+        </div>
+        <div class="log-row" style="padding: 14px 16px; border-bottom: 1px solid #1e2a3a; display: grid; grid-template-columns: 140px 90px 160px 140px 1fr 100px; align-items: start; gap: 0;">
+          <div class="mono" style="font-size: 12px; color: #94a3b8; padding-top:2px;">2025-01-20</div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #60a5fa; padding-top:2px;">13:55</div>
+          <div style="padding-top:2px;"><span class="pill-green" style="font-size:11px;padding:2px 8px;border-radius:4px;">Control Room</span></div>
+          <div style="font-size: 13px; padding-top:2px;">Fatima Bello</div>
+          <div>
+            <div style="font-size: 13px; margin-bottom:2px;"><span class="action-approval">Was given approval</span> to proceed with scheduled maintenance on Pump Unit B. Duration: 2 hours.</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">Entry time: 13:55:12</div>
+          </div>
+          <div style="padding-top:2px;"><span class="mono" style="font-size:10px;color:#4a5568;">locked</span></div>
+        </div>
+        <div class="log-row" style="padding: 14px 16px; border-bottom: 1px solid #1e2a3a; display: grid; grid-template-columns: 140px 90px 160px 140px 1fr 100px; align-items: start; gap: 0;">
+          <div class="mono" style="font-size: 12px; color: #94a3b8; padding-top:2px;">2025-01-20</div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #60a5fa; padding-top:2px;">13:40</div>
+          <div style="padding-top:2px;"><span style="background:#1a0a2e;color:#c4b5fd;border:1px solid #3730a3;font-size:11px;padding:2px 8px;border-radius:4px;">Station Bravo</span></div>
+          <div style="font-size: 13px; padding-top:2px;">Chris Okafor</div>
+          <div>
+            <div style="font-size: 13px; margin-bottom:2px;"><span class="action-instructed">Was instructed to</span> increase monitoring frequency on pressure sensor P-14 from 30min to 15min intervals.</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">Entry time: 13:42:07</div>
+          </div>
+          <div style="padding-top:2px;"><span class="mono" style="font-size:10px;color:#4a5568;">locked</span></div>
+        </div>
+        <div class="log-row" style="padding: 14px 16px; border-bottom: 1px solid #1e2a3a; display: grid; grid-template-columns: 140px 90px 160px 140px 1fr 100px; align-items: start; gap: 0;">
+          <div class="mono" style="font-size: 12px; color: #94a3b8; padding-top:2px;">2025-01-20</div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #60a5fa; padding-top:2px;">12:10</div>
+          <div style="padding-top:2px;"><span class="pill-amber" style="font-size:11px;padding:2px 8px;border-radius:4px;">Station Delta</span></div>
+          <div style="font-size: 13px; padding-top:2px;">Grace Nwosu</div>
+          <div>
+            <div style="font-size: 13px; margin-bottom:2px;"><span class="action-misc">Miscellaneous</span> Site visit from HSE inspector. Facility tour completed without incident. Report pending.</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">Entry time: 12:13:55</div>
+          </div>
+          <div style="padding-top:2px;"><span class="mono" style="font-size:10px;color:#4a5568;">locked</span></div>
+        </div>
+        <div class="log-row" style="padding: 14px 16px; display: grid; grid-template-columns: 140px 90px 160px 140px 1fr 100px; align-items: start; gap: 0;">
+          <div class="mono" style="font-size: 12px; color: #94a3b8; padding-top:2px;">2025-01-19</div>
+          <div class="mono" style="font-size: 13px; font-weight: 600; color: #60a5fa; padding-top:2px;">09:22</div>
+          <div style="padding-top:2px;"><span class="pill-blue" style="font-size:11px;padding:2px 8px;border-radius:4px;">Station Alpha</span></div>
+          <div style="font-size: 13px; padding-top:2px;">Samuel Adeyemi</div>
+          <div>
+            <div style="font-size: 13px; margin-bottom:2px;"><span class="action-reported">Reported that</span> shift handover completed. All systems nominal. Night log handed to day team.</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">Entry time: 09:23:01</div>
+          </div>
+          <div style="padding-top:2px;"><span class="mono" style="font-size:10px;color:#4a5568;">locked</span></div>
+        </div>
+      </div>
+
+      <!-- Pagination -->
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-top: 1px solid #1e2a3a; background: #0d1117;">
+        <div style="font-size: 12px; color: #4a5568;">Showing 1–5 of 247 entries</div>
+        <div style="display: flex; gap: 4px;">
+          <button class="view-btn" style="padding: 5px 10px;">←</button>
+          <button class="view-btn active">1</button>
+          <button class="view-btn">2</button>
+          <button class="view-btn">3</button>
+          <button class="view-btn" style="padding: 5px 10px;">→</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<!--  SCREEN 4 — CREATE LOG                  -->
+<!-- ════════════════════════════════════════ -->
+<div id="screen-create-log" class="screen" style="min-height: calc(100vh - 49px); flex-direction: row;">
+  <div class="sidebar" style="background: #0d1117; border-right: 1px solid #1e2a3a; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; min-height: calc(100vh - 49px);">
+    <div style="padding: 0 8px; margin-bottom: 16px;">
+      <div style="font-size: 11px; color: #3b82f6; font-weight: 600;" class="mono">STATIONLOG</div>
+      <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">Samuel Adeyemi · Operator</div>
+    </div>
+    <a class="nav-item" onclick="showScreen('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item" onclick="showScreen('log-list')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+      Log Entries
+    </a>
+    <a class="nav-item active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      New Entry
+    </a>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 28px; max-width: 780px;">
+    <div style="margin-bottom: 24px;">
+      <h1 style="font-size: 22px; font-weight: 600; margin: 0 0 4px;">New Log Entry</h1>
+      <div style="font-size: 13px; color: #64748b;">Station Alpha · Device DEV-0042 · John Doe</div>
+    </div>
+
+    <!-- Log Preview Banner -->
+    <div id="log-preview" class="card" style="padding: 16px 20px; margin-bottom: 24px; border-color: #1e3a5f; background: #0c1a2e;">
+      <div style="font-size: 10px; color: #3b82f6; font-weight: 600; margin-bottom: 8px; letter-spacing: 1px;" class="mono">LOG PREVIEW</div>
+      <div style="font-size: 13px; line-height: 1.7; color: #94a3b8;" id="preview-text">
+        <span style="color:#e2e8f0;" class="mono">2025-01-20 · 14:32</span> &nbsp;|&nbsp; 
+        <span style="color:#60a5fa;">Station Alpha</span> &nbsp;|&nbsp; 
+        Operator: <span style="color:#e2e8f0;">Samuel Adeyemi</span><br/>
+        <span class="action-reported">Reported that</span> <span id="preview-event" style="color:#e2e8f0;font-style:italic;">— awaiting event description —</span>
+      </div>
+    </div>
+
+    <div class="card" style="padding: 28px; display: flex; flex-direction: column; gap: 24px;">
+      <!-- Row 1: Date + Time -->
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div>
+          <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500;" class="mono">DATE</label>
+          <input class="field" type="date" value="2025-01-20" id="log-date" oninput="updatePreview()"/>
+        </div>
+        <div>
+          <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500;" class="mono">TIME (24-HOUR)</label>
+          <input class="field" type="time" value="14:32" id="log-time" oninput="updatePreview()"/>
+        </div>
+      </div>
+
+      <!-- Station -->
+      <div>
+        <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500;" class="mono">STATION</label>
+        <select class="field" id="log-station" oninput="updatePreview()">
+          <option>Station Alpha</option>
+          <option>Station Bravo</option>
+          <option>Control Room</option>
+          <option>Station Delta</option>
+        </select>
+      </div>
+
+      <!-- Operator name -->
+      <div>
+        <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 6px; font-weight: 500;" class="mono">OPERATOR ON DUTY</label>
+        <input class="field" value="Samuel Adeyemi" id="log-operator" oninput="updatePreview()"/>
+      </div>
+
+      <!-- Action Type -->
+      <div>
+        <label style="font-size: 12px; color: #94a3b8; display: block; margin-bottom: 8px; font-weight: 500;" class="mono">ACTION TYPE</label>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;" id="action-grid">
+          <button class="btn-ghost" id="action-reported" onclick="selectAction('reported')" style="padding: 12px; text-align: left; border-color: #3b82f6; background: #0c1a2e; color: #60a5fa; border-radius: 6px;">
+            <div style="font-weight: 600; font-size: 13px;">Reported that</div>
+            <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">An observation or report</div>
+          </button>
+          <button class="btn-ghost" id="action-instructed" onclick="selectAction('instructed')" style="padding: 12px; text-align: left; border-radius: 6px;">
+            <div style="font-weight: 600; font-size: 13px;">Was instructed to</div>
+            <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">A directive received</div>
+          </button>
+          <button class="btn-ghost" id="action-approval" onclick="selectAction('approval')" style="padding: 12px; text-align: left; border-radius: 6px;">
+            <div style="font-weight: 600; font-size: 13px;">Was given approval</div>
+            <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">An authorization granted</div>
+          </button>
+          <button class="btn-ghost" id="action-misc" onclick="selectAction('misc')" style="padding: 12px; text-align: left; border-radius: 6px;">
+            <div style="font-weight: 600; font-size: 13px;">Miscellaneous</div>
+            <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">Other notable event</div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Event description + Audio -->
+      <div>
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <label style="font-size: 12px; color: #94a3b8; font-weight: 500;" class="mono">EVENT DESCRIPTION</label>
+          <!-- Mic button -->
+          <button id="mic-btn" onclick="toggleRecording()" style="display: flex; align-items: center; gap: 6px; background: #0c1a2e; border: 1px solid #1e3a5f; color: #60a5fa; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif; font-size: 12px; transition: all 0.15s;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            <span id="mic-label">Speak to log</span>
+          </button>
+        </div>
+
+        <!-- Audio recording indicator -->
+        <div id="recording-ui" style="display: none; background: #0c1a2e; border: 1px solid #1e3a5f; border-radius: 8px; padding: 12px 16px; margin-bottom: 8px; align-items: center; gap: 12px;">
+          <div class="recording-dot" style="width: 10px; height: 10px; border-radius: 50%; background: #ef4444; flex-shrink: 0;"></div>
+          <div style="display: flex; gap: 3px; align-items: center; height: 24px;">
+            <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+            <div class="wave-bar"></div><div class="wave-bar"></div><div class="wave-bar"></div>
+            <div class="wave-bar"></div><div class="wave-bar"></div>
+          </div>
+          <div style="font-size: 12px; color: #60a5fa;" class="mono" id="rec-timer">00:00</div>
+          <div style="font-size: 12px; color: #94a3b8; flex: 1;">Recording... tap mic to stop</div>
+          <div style="font-size: 11px; color: #3b82f6; background: #0a1628; padding: 3px 8px; border-radius: 4px;">Whisper STT</div>
+        </div>
+
+        <textarea class="field" id="log-event" rows="5" placeholder="Describe the event in detail..." oninput="updatePreview()" style="resize: vertical; line-height: 1.6; font-size: 14px;">Generator 2 fuel level dropped below 30% threshold. Refueling scheduled for 16:00. Backup unit standing by.</textarea>
+      </div>
+
+      <!-- Submit row -->
+      <div style="display: flex; gap: 12px; align-items: center; padding-top: 8px; border-top: 1px solid #1e2a3a;">
+        <button class="btn-primary" style="padding: 12px 28px; font-size: 15px;" onclick="showScreen('log-list')">
+          Submit Log Entry
+        </button>
+        <button class="btn-ghost" onclick="showScreen('log-list')">Cancel</button>
+        <div style="margin-left: auto; font-size: 11px; color: #4a5568;" class="mono">
+          Timestamp will be recorded automatically
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<!--  SCREEN 5 — MOBILE VIEW                 -->
+<!-- ════════════════════════════════════════ -->
+<div id="screen-mobile" class="screen" style="min-height: calc(100vh - 49px); background: #0f1117; justify-content: center; align-items: flex-start; padding: 30px 20px; gap: 40px; flex-wrap: wrap;">
+  <!-- Company App (Can log) -->
+  <div>
+    <div style="text-align: center; margin-bottom: 12px;">
+      <div style="font-size: 12px; color: #64748b; font-weight: 500;" class="mono">COMPANY DEVICE APP</div>
+      <div style="font-size: 11px; color: #4a5568;">Can write log entries</div>
+    </div>
+    <div style="width: 320px; background: #0d1117; border: 8px solid #2a3245; border-radius: 36px; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+      <!-- Status bar -->
+      <div style="background: #090c13; padding: 10px 16px 8px; display: flex; justify-content: space-between; align-items: center;">
+        <span class="mono" style="font-size: 10px; color: #4a5568;">14:32</span>
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <span style="font-size: 10px; color: #4a5568;">●●●</span>
+          <span style="font-size: 10px; color: #34d399; display: flex; align-items: center; gap: 3px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:12px;height:12px"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+            Verified
+          </span>
+        </div>
+      </div>
+      <!-- Header -->
+      <div style="background: #090c13; padding: 10px 16px 14px; border-bottom: 1px solid #1e2a3a;">
+        <div style="font-size: 16px; font-weight: 600;">New Log Entry</div>
+        <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">Station Alpha · Samuel A.</div>
+      </div>
+      <!-- Form -->
+      <div style="padding: 16px; display: flex; flex-direction: column; gap: 14px; min-height: 480px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <div style="font-size: 10px; color: #4a5568; margin-bottom: 5px;" class="mono">DATE</div>
+            <div class="field" style="font-size: 13px; padding: 8px 10px;">2025-01-20</div>
+          </div>
+          <div>
+            <div style="font-size: 10px; color: #4a5568; margin-bottom: 5px;" class="mono">TIME</div>
+            <div class="field" style="font-size: 13px; padding: 8px 10px; font-weight: 600; color: #60a5fa;" class="mono">14:32</div>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 10px; color: #4a5568; margin-bottom: 5px;" class="mono">STATION</div>
+          <div class="field" style="font-size: 13px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center;">
+            Station Alpha <span style="color: #4a5568;">▾</span>
+          </div>
+        </div>
+        <div>
+          <div style="font-size: 10px; color: #4a5568; margin-bottom: 5px;" class="mono">ACTION</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
+            <div class="field" style="font-size: 11px; padding: 8px; background: #0c1a2e; border-color: #3b82f6; color: #60a5fa; text-align: center; font-weight: 500;">Reported that</div>
+            <div class="field" style="font-size: 11px; padding: 8px; text-align: center; color: #64748b;">Instructed to</div>
+            <div class="field" style="font-size: 11px; padding: 8px; text-align: center; color: #64748b;">Approval</div>
+            <div class="field" style="font-size: 11px; padding: 8px; text-align: center; color: #64748b;">Misc.</div>
+          </div>
+        </div>
+        <div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <div style="font-size: 10px; color: #4a5568;" class="mono">EVENT</div>
+            <!-- Mobile mic button -->
+            <div style="display: flex; align-items: center; gap: 6px; background: #0c1a2e; border: 1px solid #1e3a5f; padding: 5px 10px; border-radius: 20px; cursor: pointer;">
+              <div class="recording-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #ef4444;"></div>
+              <div style="display: flex; gap: 2px; align-items: center; height: 16px;">
+                <div class="wave-bar" style="height: 4px;"></div><div class="wave-bar" style="height: 4px;"></div><div class="wave-bar" style="height: 4px;"></div><div class="wave-bar" style="height: 4px;"></div><div class="wave-bar" style="height: 4px;"></div>
+              </div>
+              <span style="font-size: 10px; color: #60a5fa;" class="mono">00:04</span>
+            </div>
+          </div>
+          <div class="field" style="font-size: 12px; padding: 10px; min-height: 80px; line-height: 1.5; color: #60a5fa; border-color: #1e3a5f; background: #080f1a;">
+            Generator 2 fuel level dropped below 30%...
+            <span style="border-left: 2px solid #3b82f6; animation: pulse-rec 1s infinite;">|</span>
+          </div>
+          <div style="font-size: 10px; color: #34d399; margin-top: 4px;">✓ Transcribed from voice — tap to edit</div>
+        </div>
+        <!-- Submit -->
+        <button class="btn-primary" style="width: 100%; padding: 13px; font-size: 14px; border-radius: 8px; margin-top: 4px;">
+          Submit Log Entry
+        </button>
+      </div>
+      <!-- Mobile nav -->
+      <div style="background: #090c13; border-top: 1px solid #1e2a3a; padding: 8px 4px 12px; display: flex;">
+        <div class="mobile-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Home
+        </div>
+        <div class="mobile-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Logs
+        </div>
+        <div class="mobile-nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+          New Log
+        </div>
+        <div class="mobile-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+          Profile
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Viewer App (No logging) -->
+  <div>
+    <div style="text-align: center; margin-bottom: 12px;">
+      <div style="font-size: 12px; color: #64748b; font-weight: 500;" class="mono">VIEWER APP (ANY DEVICE)</div>
+      <div style="font-size: 11px; color: #4a5568;">View & download only · no write access</div>
+    </div>
+    <div style="width: 320px; background: #0d1117; border: 8px solid #2a3245; border-radius: 36px; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.5);">
+      <div style="background: #090c13; padding: 10px 16px 8px; display: flex; justify-content: space-between;">
+        <span class="mono" style="font-size: 10px; color: #4a5568;">14:32</span>
+        <span style="font-size: 10px; color: #4a5568;">Viewer Mode</span>
+      </div>
+      <div style="background: #090c13; padding: 10px 16px 14px; border-bottom: 1px solid #1e2a3a; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="font-size: 16px; font-weight: 600;">Log Entries</div>
+          <div style="font-size: 11px; color: #4a5568;">247 entries</div>
+        </div>
+        <button style="background: transparent; border: 1px solid #2a3245; color: #60a5fa; padding: 6px 10px; border-radius: 6px; font-size: 11px; cursor: pointer; font-family: 'IBM Plex Sans', sans-serif;">Export PDF</button>
+      </div>
+      <!-- Filter row -->
+      <div style="padding: 12px 16px; border-bottom: 1px solid #1e2a3a; display: flex; gap: 8px;">
+        <div class="field" style="font-size: 12px; padding: 7px 10px; flex: 1;">🔍 Search...</div>
+        <div class="field" style="font-size: 12px; padding: 7px 10px; width: 90px; color: #64748b;">Filter ▾</div>
+      </div>
+      <!-- Sort toggle -->
+      <div style="padding: 10px 16px; border-bottom: 1px solid #1e2a3a; display: flex; gap: 6px; align-items: center;">
+        <span style="font-size: 10px; color: #4a5568; flex-shrink: 0;" class="mono">SORT:</span>
+        <div style="display: flex; gap: 0;">
+          <button class="view-btn active" style="font-size: 10px; padding: 4px 10px;">Event Time</button>
+          <button class="view-btn" style="font-size: 10px; padding: 4px 10px;">Entry Time</button>
+        </div>
+      </div>
+      <!-- Log list -->
+      <div style="overflow-y: auto; max-height: 380px;">
+        <div class="log-row" style="padding: 12px 16px; border-bottom: 1px solid #1e2a3a;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+            <span class="mono" style="font-size: 10px; color: #4a5568;">2025-01-20 · 14:28</span>
+            <span class="pill-blue" style="font-size: 9px; padding: 1px 6px; border-radius: 3px;">Alpha</span>
+          </div>
+          <div style="font-size: 12px; line-height: 1.5;"><span class="action-reported">Reported that</span> Generator 2 fuel level dropped below 30%...</div>
+          <div style="font-size: 10px; color: #4a5568; margin-top: 2px;">Samuel Adeyemi</div>
+        </div>
+        <div class="log-row" style="padding: 12px 16px; border-bottom: 1px solid #1e2a3a;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+            <span class="mono" style="font-size: 10px; color: #4a5568;">2025-01-20 · 13:55</span>
+            <span class="pill-green" style="font-size: 9px; padding: 1px 6px; border-radius: 3px;">Control</span>
+          </div>
+          <div style="font-size: 12px; line-height: 1.5;"><span class="action-approval">Was given approval</span> to proceed with maintenance on Pump Unit B...</div>
+          <div style="font-size: 10px; color: #4a5568; margin-top: 2px;">Fatima Bello</div>
+        </div>
+        <div class="log-row" style="padding: 12px 16px; border-bottom: 1px solid #1e2a3a;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+            <span class="mono" style="font-size: 10px; color: #4a5568;">2025-01-20 · 13:40</span>
+            <span style="background:#1a0a2e;color:#c4b5fd;border:1px solid #3730a3;font-size:9px;padding:1px 6px;border-radius:3px;">Bravo</span>
+          </div>
+          <div style="font-size: 12px; line-height: 1.5;"><span class="action-instructed">Was instructed to</span> increase monitoring on pressure sensor P-14...</div>
+          <div style="font-size: 10px; color: #4a5568; margin-top: 2px;">Chris Okafor</div>
+        </div>
+        <div class="log-row" style="padding: 12px 16px;">
+          <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+            <span class="mono" style="font-size: 10px; color: #4a5568;">2025-01-20 · 12:10</span>
+            <span class="pill-amber" style="font-size: 9px; padding: 1px 6px; border-radius: 3px;">Delta</span>
+          </div>
+          <div style="font-size: 12px; line-height: 1.5;"><span class="action-misc">Miscellaneous</span> Site visit from HSE inspector. No incidents...</div>
+          <div style="font-size: 10px; color: #4a5568; margin-top: 2px;">Grace Nwosu</div>
+        </div>
+      </div>
+      <!-- Mobile nav — no "New Log" tab -->
+      <div style="background: #090c13; border-top: 1px solid #1e2a3a; padding: 8px 4px 12px; display: flex;">
+        <div class="mobile-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+          Home
+        </div>
+        <div class="mobile-nav-item active">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Logs
+        </div>
+        <div class="mobile-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/><polyline points="6 9 12 15 18 9" transform="translate(0,4)"/></svg>
+          Export
+        </div>
+        <div class="mobile-nav-item">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M20 21a8 8 0 1 0-16 0"/></svg>
+          Profile
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════════════ -->
+<!--  SCREEN 6 — ADMIN PANEL                 -->
+<!-- ════════════════════════════════════════ -->
+<div id="screen-admin" class="screen" style="min-height: calc(100vh - 49px); flex-direction: row;">
+  <div class="sidebar" style="background: #0d1117; border-right: 1px solid #1e2a3a; padding: 20px 12px; display: flex; flex-direction: column; gap: 4px; min-height: calc(100vh - 49px);">
+    <div style="padding: 0 8px; margin-bottom: 16px;">
+      <div style="font-size: 11px; color: #3b82f6; font-weight: 600;" class="mono">STATIONLOG</div>
+      <div style="font-size: 11px; color: #4a5568; margin-top: 2px;">Admin · Super Access</div>
+    </div>
+    <a class="nav-item" onclick="showScreen('dashboard')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+      Dashboard
+    </a>
+    <a class="nav-item" onclick="showScreen('log-list')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+      Log Entries
+    </a>
+    <a class="nav-item active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      Users & Devices
+    </a>
+  </div>
+
+  <div style="flex: 1; overflow-y: auto; padding: 28px; display: flex; flex-direction: column; gap: 24px;">
+    <div>
+      <h1 style="font-size: 22px; font-weight: 600; margin: 0 0 4px;">Users & Device Management</h1>
+      <div style="font-size: 13px; color: #64748b;">Admin panel — full system control</div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;">
+      <!-- Users table -->
+      <div class="card" style="overflow: hidden;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #1e2a3a; display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 13px; font-weight: 600; color: #94a3b8;" class="mono">USERS (6)</div>
+          <button class="btn-primary" style="font-size: 12px; padding: 7px 14px;" onclick="openAddUserModal()">+ Add User</button>
+        </div>
+        <div>
+          <div style="display: grid; grid-template-columns: 1fr 100px 70px; padding: 8px 16px; border-bottom: 1px solid #1e2a3a; background: #0d1117;">
+            <div class="mono" style="font-size: 10px; color: #4a5568;">NAME / EMAIL</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">ROLE</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">ACTION</div>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <div style="display: grid; grid-template-columns: 1fr 100px 70px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;">John Doe</div>
+                <div style="font-size: 11px; color: #4a5568;">john@ops.com</div>
+              </div>
+              <span class="pill-red" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;" class="mono">ADMIN</span>
+              <button class="btn-ghost" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 100px 70px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;">Samuel Adeyemi</div>
+                <div style="font-size: 11px; color: #4a5568;">samuel@ops.com</div>
+              </div>
+              <span class="pill-blue" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;" class="mono">OPER.</span>
+              <button class="btn-ghost" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 100px 70px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;">Fatima Bello</div>
+                <div style="font-size: 11px; color: #4a5568;">fatima@ops.com</div>
+              </div>
+              <span class="pill-blue" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;" class="mono">OPER.</span>
+              <button class="btn-ghost" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 100px 70px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;">Grace Nwosu</div>
+                <div style="font-size: 11px; color: #4a5568;">grace@mgmt.com</div>
+              </div>
+              <span class="pill-amber" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;" class="mono">DOWN.</span>
+              <button class="btn-ghost" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 100px 70px; padding: 12px 16px; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;">Chris Okafor</div>
+                <div style="font-size: 11px; color: #4a5568;">chris@audit.com</div>
+              </div>
+              <span style="background:#1a1a2e;color:#a78bfa;border:1px solid #3730a3;font-size:10px;padding:2px 8px;border-radius:4px;display:inline-block;width:fit-content;" class="mono">VIEW</span>
+              <button class="btn-ghost" style="font-size: 11px; padding: 4px 8px;">Edit</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Devices table -->
+      <div class="card" style="overflow: hidden;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid #1e2a3a; display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-size: 13px; font-weight: 600; color: #94a3b8;" class="mono">COMPANY DEVICES (4)</div>
+          <button class="btn-primary" style="font-size: 12px; padding: 7px 14px;">+ Register</button>
+        </div>
+        <div>
+          <div style="display: grid; grid-template-columns: 1fr 90px 60px; padding: 8px 16px; border-bottom: 1px solid #1e2a3a; background: #0d1117;">
+            <div class="mono" style="font-size: 10px; color: #4a5568;">DEVICE</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">STATUS</div>
+            <div class="mono" style="font-size: 10px; color: #4a5568;">ACTION</div>
+          </div>
+          <div style="display: flex; flex-direction: column;">
+            <div style="display: grid; grid-template-columns: 1fr 90px 60px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;" class="mono">DEV-0042</div>
+                <div style="font-size: 11px; color: #4a5568;">Samsung Galaxy S23 · Alpha</div>
+              </div>
+              <span class="pill-green" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;">Active</span>
+              <button class="btn-danger" style="font-size: 11px; padding: 3px 8px;">Revoke</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 90px 60px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;" class="mono">DEV-0039</div>
+                <div style="font-size: 11px; color: #4a5568;">iPhone 15 · Control Room</div>
+              </div>
+              <span class="pill-green" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;">Active</span>
+              <button class="btn-danger" style="font-size: 11px; padding: 3px 8px;">Revoke</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 90px 60px; padding: 12px 16px; border-bottom: 1px solid #1e2a3a; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;" class="mono">DEV-0031</div>
+                <div style="font-size: 11px; color: #4a5568;">Tablet X · Bravo</div>
+              </div>
+              <span class="pill-green" style="font-size: 10px; padding: 2px 8px; border-radius: 4px; display: inline-block; width: fit-content;">Active</span>
+              <button class="btn-danger" style="font-size: 11px; padding: 3px 8px;">Revoke</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 90px 60px; padding: 12px 16px; align-items: center;">
+              <div>
+                <div style="font-size: 13px; font-weight: 500;" class="mono">DEV-0018</div>
+                <div style="font-size: 11px; color: #4a5568;">Old Phone · Retired</div>
+              </div>
+              <span style="background:#2d0a0a;color:#f87171;border:1px solid #7f1d1d;font-size:10px;padding:2px 8px;border-radius:4px;display:inline-block;width:fit-content;">Revoked</span>
+              <button class="btn-ghost" style="font-size: 11px; padding: 3px 8px;">Restore</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stations management -->
+    <div class="card" style="padding: 20px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <div style="font-size: 13px; font-weight: 600; color: #94a3b8;" class="mono">STATIONS</div>
+        <button class="btn-primary" style="font-size: 12px; padding: 7px 14px;">+ Add Station</button>
+      </div>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <div class="field" style="width: auto; padding: 8px 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px;">
+          <span class="pill-green" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;">●</span> Station Alpha
+        </div>
+        <div class="field" style="width: auto; padding: 8px 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px;">
+          <span class="pill-green" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;">●</span> Station Bravo
+        </div>
+        <div class="field" style="width: auto; padding: 8px 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px;">
+          <span class="pill-green" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;">●</span> Control Room
+        </div>
+        <div class="field" style="width: auto; padding: 8px 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px;">
+          <span class="pill-amber" style="font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0;">●</span> Station Delta
+        </div>
+        <div class="field" style="width: auto; padding: 8px 16px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px; opacity: 0.5;">
+          <span style="font-size: 10px; padding: 1px 6px; border-radius: 3px; flex-shrink: 0; background:#1e2a3a; color:#4a5568;">●</span> Station Echo
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════ MODALS ════════════ -->
+
+<!-- Edit Log Modal -->
+<div id="edit-modal" class="modal-overlay" style="display: none;" onclick="closeModal('edit-modal')">
+  <div class="modal fade-up" onclick="event.stopPropagation()">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <div>
+        <div style="font-size: 16px; font-weight: 600;">Edit Log Entry</div>
+        <div style="font-size: 12px; color: #4a5568; margin-top: 2px;">⏱ Edit window closes in <span style="color: #fbbf24;" class="mono">18:43:12</span></div>
+      </div>
+      <button onclick="closeModal('edit-modal')" style="background: transparent; border: none; color: #64748b; cursor: pointer; font-size: 20px; padding: 4px;">×</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <div>
+          <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 5px;" class="mono">DATE</label>
+          <input class="field" type="date" value="2025-01-20"/>
+        </div>
+        <div>
+          <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 5px;" class="mono">TIME</label>
+          <input class="field" type="time" value="14:28"/>
+        </div>
+      </div>
+      <div>
+        <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 5px;" class="mono">EVENT DESCRIPTION</label>
+        <textarea class="field" rows="4" style="resize: none;">Generator 2 fuel level dropped below 30% threshold. Refueling scheduled for 16:00. Backup unit standing by.</textarea>
+      </div>
+      <div style="background: #0c1a2e; border: 1px solid #1e3a5f; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #60a5fa;">
+        ℹ Only you can edit this entry. Original timestamp will be preserved.
+      </div>
+      <div style="display: flex; gap: 10px; padding-top: 4px;">
+        <button class="btn-primary" onclick="closeModal('edit-modal')">Save Changes</button>
+        <button class="btn-ghost" onclick="closeModal('edit-modal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add User Modal -->
+<div id="add-user-modal" class="modal-overlay" style="display: none;" onclick="closeModal('add-user-modal')">
+  <div class="modal fade-up" onclick="event.stopPropagation()">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <div style="font-size: 16px; font-weight: 600;">Add New User</div>
+      <button onclick="closeModal('add-user-modal')" style="background: transparent; border: none; color: #64748b; cursor: pointer; font-size: 20px;">×</button>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 14px;">
+      <div>
+        <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 5px;" class="mono">FULL NAME</label>
+        <input class="field" placeholder="Full name"/>
+      </div>
+      <div>
+        <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 5px;" class="mono">EMAIL ADDRESS</label>
+        <input class="field" type="email" placeholder="user@company.com"/>
+      </div>
+      <div>
+        <label style="font-size: 11px; color: #94a3b8; display: block; margin-bottom: 5px;" class="mono">ROLE</label>
+        <select class="field">
+          <option>Admin</option>
+          <option selected>Operator</option>
+          <option>Downloader</option>
+          <option>Viewer</option>
+        </select>
+      </div>
+      <div style="background: #0f2010; border: 1px solid #065f46; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #34d399;">
+        A password setup email will be sent to the user automatically.
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <button class="btn-primary" onclick="closeModal('add-user-modal')">Create User</button>
+        <button class="btn-ghost" onclick="closeModal('add-user-modal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<script>
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('[id^="tab-"]').forEach(t => t.classList.remove('active'));
+  document.getElementById('screen-' + id).classList.add('active');
+  const tab = document.getElementById('tab-' + id);
+  if (tab) tab.classList.add('active');
+}
+
+function toggleSort(type) {
+  document.getElementById('sort-event').classList.toggle('active', type === 'event');
+  document.getElementById('sort-entry').classList.toggle('active', type === 'entry');
+}
+
+let isRecording = false;
+let recInterval;
+let recSeconds = 0;
+
+function toggleRecording() {
+  isRecording = !isRecording;
+  const ui = document.getElementById('recording-ui');
+  const btn = document.getElementById('mic-btn');
+  const label = document.getElementById('mic-label');
+  if (isRecording) {
+    ui.style.display = 'flex';
+    label.textContent = 'Stop recording';
+    btn.style.borderColor = '#ef4444';
+    btn.style.color = '#ef4444';
+    recSeconds = 0;
+    recInterval = setInterval(() => {
+      recSeconds++;
+      const m = Math.floor(recSeconds/60).toString().padStart(2,'0');
+      const s = (recSeconds%60).toString().padStart(2,'0');
+      document.getElementById('rec-timer').textContent = m + ':' + s;
+    }, 1000);
+  } else {
+    ui.style.display = 'none';
+    label.textContent = 'Speak to log';
+    btn.style.borderColor = '#1e3a5f';
+    btn.style.color = '#60a5fa';
+    clearInterval(recInterval);
+    // Simulate transcription result
+    setTimeout(() => {
+      const ta = document.getElementById('log-event');
+      ta.value = 'Generator 2 fuel level dropped below 30% threshold. Refueling scheduled for 16:00. Backup unit standing by.';
+      updatePreview();
+    }, 400);
+  }
+}
+
+function updatePreview() {
+  const ev = document.getElementById('log-event');
+  const prev = document.getElementById('preview-event');
+  if (ev && prev) {
+    prev.textContent = ev.value.substring(0, 100) + (ev.value.length > 100 ? '...' : '');
+  }
+}
+
+function openLogDetail() {}
+function openEditModal() { document.getElementById('edit-modal').style.display = 'flex'; }
+function openAddUserModal() { document.getElementById('add-user-modal').style.display = 'flex'; }
+function closeModal(id) { document.getElementById(id).style.display = 'none'; }
+
+let selectedAction = 'reported';
+const actionStyles = {
+  'reported':   { border: '#3b82f6', bg: '#0c1a2e', color: '#60a5fa' },
+  'instructed': { border: '#8b5cf6', bg: '#13082a', color: '#a78bfa' },
+  'approval':   { border: '#10b981', bg: '#052e1c', color: '#34d399' },
+  'misc':       { border: '#f97316', bg: '#2a1200', color: '#fb923c' },
+};
+
+function selectAction(type) {
+  selectedAction = type;
+  ['reported','instructed','approval','misc'].forEach(a => {
+    const btn = document.getElementById('action-' + a);
+    if (!btn) return;
+    if (a === type) {
+      const s = actionStyles[a];
+      btn.style.borderColor = s.border;
+      btn.style.background = s.bg;
+      btn.style.color = s.color;
+    } else {
+      btn.style.borderColor = '#2a3245';
+      btn.style.background = 'transparent';
+      btn.style.color = '#94a3b8';
+    }
+  });
+}
+
+// Live clock
+function updateClock() {
+  const el = document.getElementById('dash-time');
+  if (!el) return;
+  const now = new Date();
+  const days = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
+  const d = days[now.getDay()];
+  const date = now.toISOString().split('T')[0];
+  const time = now.toTimeString().substring(0,8);
+  el.textContent = d + ' ' + date + ' · ' + time;
+}
+updateClock();
+setInterval(updateClock, 1000);
+</script>
+</body>
+</html>
