@@ -7,11 +7,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 	"e-logging-app/internal/auth"
 	"e-logging-app/internal/db"
 	"e-logging-app/internal/models"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 )
 
 type AuthHandler struct {
@@ -24,8 +25,8 @@ type DashboardHandler struct {
 }
 
 type LogHandler struct {
-	logRepo     db.LogRepository
-	deviceRepo  db.DeviceRepository
+	logRepo    db.LogRepository
+	deviceRepo db.DeviceRepository
 }
 
 type StationHandler struct {
@@ -260,6 +261,8 @@ func (h *AuthHandler) Refresh(c *fiber.Ctx) error {
 // @Param station_id query string false "Filter by station ID (UUID)"
 // @Param date_from query string false "Filter logs from date (YYYY-MM-DD)"
 // @Param date_to query string false "Filter logs until date (YYYY-MM-DD)"
+// @Param time_from query string false "Filter logs from hour (0-23)"
+// @Param time_to query string false "Filter logs until hour (0-23)"
 // @Param limit query int false "Limit number of results" default(10)
 // @Param offset query int false "Offset for pagination" default(0)
 // @Success 200 {object} map[string]interface{} "List of logs"
@@ -272,6 +275,8 @@ func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
 	stationIDStr := c.Query("station_id")
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
+	timeFromStr := c.Query("time_from")
+	timeToStr := c.Query("time_to")
 	limitStr := c.Query("limit", "10")
 	offsetStr := c.Query("offset", "0")
 
@@ -306,13 +311,33 @@ func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
 		}
 		filters["date_to"] = dateTo
 	}
+	if timeFromStr != "" {
+		timeFrom, err := strconv.Atoi(timeFromStr)
+		if err != nil || timeFrom < 0 || timeFrom > 23 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid time_from, must be between 0 and 23",
+			})
+		}
+		filters["time_from"] = timeFrom
+	}
+	if timeToStr != "" {
+		timeTo, err := strconv.Atoi(timeToStr)
+		if err != nil || timeTo < 0 || timeTo > 23 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid time_to, must be between 0 and 23",
+			})
+		}
+		filters["time_to"] = timeTo
+	}
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "Invalid limit",
-			})
+		})
 	}
 	offset, err := strconv.Atoi(offsetStr)
 	if err != nil {
@@ -517,6 +542,8 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 // @Param station_id query string false "Filter by station ID (UUID)"
 // @Param date_from query string false "Filter from date (YYYY-MM-DD)"
 // @Param date_to query string false "Filter until date (YYYY-MM-DD)"
+// @Param time_from query string false "Filter from hour (0-23)"
+// @Param time_to query string false "Filter until hour (0-23)"
 // @Success 200 {file} file "CSV file with logs"
 // @Failure 400 {object} map[string]interface{} "Invalid query parameters"
 // @Failure 401 {object} map[string]interface{} "Unauthorized"
@@ -531,6 +558,8 @@ func (h *LogHandler) ExportLogs(c *fiber.Ctx) error {
 	stationIDStr := c.Query("station_id")
 	dateFromStr := c.Query("date_from")
 	dateToStr := c.Query("date_to")
+	timeFromStr := c.Query("time_from")
+	timeToStr := c.Query("time_to")
 
 	filters := make(map[string]interface{})
 	if stationIDStr != "" {
@@ -563,6 +592,26 @@ func (h *LogHandler) ExportLogs(c *fiber.Ctx) error {
 		}
 		filters["date_to"] = dateTo
 	}
+	if timeFromStr != "" {
+		timeFrom, err := strconv.Atoi(timeFromStr)
+		if err != nil || timeFrom < 0 || timeFrom > 23 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid time_from, must be between 0 and 23",
+			})
+		}
+		filters["time_from"] = timeFrom
+	}
+	if timeToStr != "" {
+		timeTo, err := strconv.Atoi(timeToStr)
+		if err != nil || timeTo < 0 || timeTo > 23 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid time_to, must be between 0 and 23",
+			})
+		}
+		filters["time_to"] = timeTo
+	}
 
 	logs, err := h.logRepo.GetLogs(c.Context(), filters, sortBy, order, 0, 0) // No limit for export
 	if err != nil {
@@ -575,13 +624,14 @@ func (h *LogHandler) ExportLogs(c *fiber.Ctx) error {
 	// Generate CSV
 	var csvData strings.Builder
 	writer := csv.NewWriter(&csvData)
-	writer.Write([]string{"ID", "Date", "Time", "Station ID", "Operator", "Action", "Event", "Created By", "Created At"})
+	writer.Write([]string{"ID", "Date", "Time", "Station", "User", "Operator", "Action", "Event", "Created By", "Created At"})
 	for _, log := range logs {
 		writer.Write([]string{
 			log.ID.String(),
 			log.LogDate.Format("2006-01-02"),
 			log.LogTime,
-			log.StationID.String(),
+			log.StationName,
+			log.UserName,
 			log.OperatorName,
 			log.Action,
 			log.Event,

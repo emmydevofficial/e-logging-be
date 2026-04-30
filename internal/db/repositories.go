@@ -6,8 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"e-logging-app/internal/models"
+
+	"github.com/google/uuid"
 )
 
 type UserRepository interface {
@@ -243,24 +244,43 @@ func (r *logRepository) CreateLog(ctx context.Context, log *models.Log) error {
 }
 
 func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interface{}, sortBy string, order string, limit int, offset int) ([]*models.Log, error) {
-	query := `SELECT id, log_date, log_time, station_id, operator_name, action, event, created_by, created_at, updated_at, device_id FROM logs WHERE 1=1`
+	query := `SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name, u.name
+	          FROM logs l
+	          LEFT JOIN stations s ON l.station_id = s.id
+	          LEFT JOIN users u ON l.created_by = u.id
+	          WHERE 1=1`
 	args := []interface{}{}
 	argCount := 0
 
 	if stationID, ok := filters["station_id"]; ok {
 		argCount++
-		query += fmt.Sprintf(" AND station_id = $%d", argCount)
+		query += fmt.Sprintf(" AND l.station_id = $%d", argCount)
 		args = append(args, stationID)
 	}
 	if dateFrom, ok := filters["date_from"]; ok {
 		argCount++
-		query += fmt.Sprintf(" AND log_date >= $%d", argCount)
+		query += fmt.Sprintf(" AND l.log_date >= $%d", argCount)
 		args = append(args, dateFrom)
 	}
 	if dateTo, ok := filters["date_to"]; ok {
 		argCount++
-		query += fmt.Sprintf(" AND log_date <= $%d", argCount)
+		query += fmt.Sprintf(" AND l.log_date <= $%d", argCount)
 		args = append(args, dateTo)
+	}
+	if hour, ok := filters["hour"]; ok {
+		argCount++
+		query += fmt.Sprintf(" AND EXTRACT(HOUR FROM l.created_at) = $%d", argCount)
+		args = append(args, hour)
+	}
+	if timeFrom, ok := filters["time_from"]; ok {
+		argCount++
+		query += fmt.Sprintf(" AND EXTRACT(HOUR FROM l.created_at) >= $%d", argCount)
+		args = append(args, timeFrom)
+	}
+	if timeTo, ok := filters["time_to"]; ok {
+		argCount++
+		query += fmt.Sprintf(" AND EXTRACT(HOUR FROM l.created_at) <= $%d", argCount)
+		args = append(args, timeTo)
 	}
 
 	if sortBy == "" {
@@ -269,7 +289,7 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 	if order == "" {
 		order = "desc"
 	}
-	query += fmt.Sprintf(" ORDER BY %s %s", sortBy, order)
+	query += fmt.Sprintf(" ORDER BY l.%s %s", sortBy, order)
 
 	if limit > 0 {
 		argCount++
@@ -291,7 +311,7 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 	var logs []*models.Log
 	for rows.Next() {
 		log := &models.Log{}
-		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID)
+		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName)
 		if err != nil {
 			return nil, err
 		}
@@ -445,9 +465,10 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 
 	// Recent logs (last 10)
 	recentRows, err := r.db.Pool.Query(ctx, `
-		SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name as station_name
+		SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name as station_name, u.name as user_name
 		FROM logs l
 		JOIN stations s ON l.station_id = s.id
+		LEFT JOIN users u ON l.created_by = u.id
 		ORDER BY l.created_at DESC
 		LIMIT 10
 	`)
@@ -459,7 +480,7 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 	var recentLogs []*models.Log
 	for recentRows.Next() {
 		log := &models.Log{}
-		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName)
+		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan recent log: %w", err)
 		}

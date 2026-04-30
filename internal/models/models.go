@@ -50,21 +50,22 @@ type Log struct {
 	CreatedAt    time.Time `json:"created_at" db:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at" db:"updated_at"`
 	DeviceID     uuid.UUID `json:"device_id" db:"device_id"`
-	StationName string `json:"station_name"`
+	StationName  string    `json:"station_name"`
+	UserName     string    `json:"user_name"`
 }
 
 type DashboardStats struct {
-	TotalLogsToday     int                    `json:"total_logs_today"`
-	LogsYesterday      int                    `json:"logs_yesterday"`
-	ActiveStations     int                    `json:"active_stations"`
-	TotalStations      int                    `json:"total_stations"`
-	OperatorsOnDuty    int                    `json:"operators_on_duty"`
-	LastEntryTime      string                 `json:"last_entry_time"`
-	LastEntryStation   string                 `json:"last_entry_station"`
-	LastEntryOperator  string                 `json:"last_entry_operator"`
-	ActionBreakdown    map[string]int         `json:"action_breakdown"`
-	StationActivity    []StationActivity      `json:"station_activity"`
-	RecentLogs         []*Log                 `json:"recent_logs"`
+	TotalLogsToday    int               `json:"total_logs_today"`
+	LogsYesterday     int               `json:"logs_yesterday"`
+	ActiveStations    int               `json:"active_stations"`
+	TotalStations     int               `json:"total_stations"`
+	OperatorsOnDuty   int               `json:"operators_on_duty"`
+	LastEntryTime     string            `json:"last_entry_time"`
+	LastEntryStation  string            `json:"last_entry_station"`
+	LastEntryOperator string            `json:"last_entry_operator"`
+	ActionBreakdown   map[string]int    `json:"action_breakdown"`
+	StationActivity   []StationActivity `json:"station_activity"`
+	RecentLogs        []*Log            `json:"recent_logs"`
 }
 
 type StationActivity struct {
