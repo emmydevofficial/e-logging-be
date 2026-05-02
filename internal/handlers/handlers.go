@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/csv"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -25,8 +26,10 @@ type DashboardHandler struct {
 }
 
 type LogHandler struct {
-	logRepo    db.LogRepository
-	deviceRepo db.DeviceRepository
+	logRepo     db.LogRepository
+	deviceRepo  db.DeviceRepository
+	sessionRepo db.OperatorSessionRepository
+	userRepo    db.UserRepository
 }
 
 type StationHandler struct {
@@ -41,14 +44,20 @@ type UserHandler struct {
 	userRepo db.UserRepository
 }
 
+type OperatorSessionHandler struct {
+	sessionRepo db.OperatorSessionRepository
+	userRepo    db.UserRepository
+	logRepo     db.LogRepository
+}
+
 type STTHandler struct{}
 
 func NewAuthHandler(userRepo db.UserRepository, deviceRepo db.DeviceRepository) *AuthHandler {
 	return &AuthHandler{userRepo: userRepo, deviceRepo: deviceRepo}
 }
 
-func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository) *LogHandler {
-	return &LogHandler{logRepo: logRepo, deviceRepo: deviceRepo}
+func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository, sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository) *LogHandler {
+	return &LogHandler{logRepo: logRepo, deviceRepo: deviceRepo, sessionRepo: sessionRepo, userRepo: userRepo}
 }
 
 func NewStationHandler(stationRepo db.StationRepository) *StationHandler {
@@ -69,6 +78,10 @@ func NewSTTHandler() *STTHandler {
 
 func NewDashboardHandler(logRepo db.LogRepository) *DashboardHandler {
 	return &DashboardHandler{logRepo: logRepo}
+}
+
+func NewOperatorSessionHandler(sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository, logRepo db.LogRepository) *OperatorSessionHandler {
+	return &OperatorSessionHandler{sessionRepo: sessionRepo, userRepo: userRepo, logRepo: logRepo}
 }
 
 // Login authenticates a user with email and password
@@ -349,6 +362,7 @@ func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
 
 	logs, err := h.logRepo.GetLogs(c.Context(), filters, sortBy, order, limit, offset)
 	if err != nil {
+		log.Printf("Error %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
 			"error":   "Failed to get logs",
@@ -415,6 +429,27 @@ func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 
 	userID := c.Locals("user_id").(uuid.UUID)
 	deviceID := c.Locals("device_id").(uuid.UUID)
+
+	// Check if user is signed in to an active session (unless admin)
+	user, err := h.userRepo.GetUserByID(c.Context(), userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to get user info",
+		})
+	}
+
+	// For non-admin users, check if they are signed in
+	if user.Role != "admin" {
+		currentSession, err := h.sessionRepo.GetOperatorCurrentSession(c.Context(), userID)
+		if err != nil || currentSession == nil {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"success": false,
+				"error":   "You must be signed in to an active session to create logs",
+			})
+		}
+		log.SessionID = &currentSession.ID
+	}
 
 	log.CreatedBy = userID
 	log.DeviceID = deviceID
@@ -1092,5 +1127,344 @@ func (h *DashboardHandler) GetDashboardStats(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data":    stats,
+	})
+}
+
+// CreateOperatorSession creates a new operator session
+// @Summary Create operator session
+// @Description Creates a new operator session for shift management (admin only)
+// @Tags operator-sessions
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param session body map[string]interface{} true "Session data" example({"max_sign_ins":5})
+// @Success 201 {object} map[string]interface{} "Created session"
+// @Failure 400 {object} map[string]interface{} "Invalid request body"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden (admin only)"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /operator-sessions [post]
+func (h *OperatorSessionHandler) CreateOperatorSession(c *fiber.Ctx) error {
+	type CreateSessionRequest struct {
+		MaxSignIns int `json:"max_sign_ins"`
+	}
+
+	var req CreateSessionRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	if req.MaxSignIns <= 0 {
+		req.MaxSignIns = 5 // default
+	}
+
+	// Check if there's already an active session for today
+	count, err := h.sessionRepo.GetActiveSessionCount(c.Context(), time.Now())
+	if err == nil && count > 0 {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error":   "A session is already active for this shift. Only one session can exist at a time.",
+		})
+	}
+
+	userID := c.Locals("user_id").(uuid.UUID)
+
+	session := &models.OperatorSession{
+		ShiftLeadID: userID,
+		StartTime:   time.Now(),
+		IsActive:    true,
+		MaxSignIns:  req.MaxSignIns,
+	}
+
+	if err := h.sessionRepo.CreateSession(c.Context(), session); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to create session",
+		})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"success": true,
+		"data":    session,
+	})
+}
+
+// GetActiveSessions retrieves all active operator sessions
+// @Summary Get active sessions
+// @Description Retrieves all currently active operator sessions
+// @Tags operator-sessions
+// @Security BearerAuth
+// @Produce json
+// @Success 200 {object} map[string]interface{} "List of active sessions"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /operator-sessions [get]
+func (h *OperatorSessionHandler) GetActiveSessions(c *fiber.Ctx) error {
+	sessions, err := h.sessionRepo.GetActiveSessions(c.Context())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to get active sessions",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    sessions,
+	})
+}
+
+// EndOperatorSession ends an operator session
+// @Summary End operator session
+// @Description Ends an active operator session (admin only)
+// @Tags operator-sessions
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Session ID (UUID)"
+// @Success 200 {object} map[string]interface{} "Session ended"
+// @Failure 400 {object} map[string]interface{} "Invalid session ID"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden (admin only)"
+// @Failure 404 {object} map[string]interface{} "Session not found"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /operator-sessions/{id} [delete]
+func (h *OperatorSessionHandler) EndOperatorSession(c *fiber.Ctx) error {
+	idStr := c.Params("id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid session ID",
+		})
+	}
+
+	if err := h.sessionRepo.EndSession(c.Context(), id); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to end session",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Session ended successfully",
+	})
+}
+
+// SignInOperator signs in an operator to a session
+// @Summary Sign in operator
+// @Description Signs in an operator to an active session
+// @Tags operator-sessions
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path string true "Session ID (UUID)"
+// @Param signin body map[string]interface{} true "Sign in data" example({"operator_id":"uuid","signed_by_id":"uuid"})
+// @Success 201 {object} map[string]interface{} "Operator signed in"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden"
+// @Failure 409 {object} map[string]interface{} "Operator already signed in or session full"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /operator-sessions/{id}/sign-in [post]
+func (h *OperatorSessionHandler) SignInOperator(c *fiber.Ctx) error {
+	sessionIDStr := c.Params("id")
+	sessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid session ID",
+		})
+	}
+
+	type SignInRequest struct {
+		OperatorID uuid.UUID `json:"operator_id"`
+		SignedByID uuid.UUID `json:"signed_by_id"`
+	}
+
+	var req SignInRequest
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	// Check if operator is already signed in
+	currentSession, err := h.sessionRepo.GetOperatorCurrentSession(c.Context(), req.OperatorID)
+	if err == nil && currentSession != nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error":   "Operator is already signed in to another session",
+		})
+	}
+
+	// Check session capacity
+	signedInOps, err := h.sessionRepo.GetSignedInOperators(c.Context(), sessionID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to check session capacity",
+		})
+	}
+
+	session, err := h.sessionRepo.GetSessionByID(c.Context(), sessionID)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "Session not found",
+		})
+	}
+
+	if len(signedInOps) >= session.MaxSignIns {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"success": false,
+			"error":   "Session is full",
+		})
+	}
+
+	signIn := &models.OperatorSignIn{
+		SessionID:  sessionID,
+		OperatorID: req.OperatorID,
+		SignedByID: req.SignedByID,
+		SignedInAt: time.Now(),
+		IsActive:   true,
+	}
+
+	if err := h.sessionRepo.SignInOperator(c.Context(), signIn); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to sign in operator",
+		})
+	}
+
+	// Create log entry for sign-in
+	log := &models.Log{
+		LogDate:      time.Now(),
+		LogTime:      time.Now().Format("15:04:05"),
+		StationID:    uuid.Nil, // Will be set by frontend or default station
+		OperatorName: "System",
+		Action:       "Operator Sign-In",
+		Event:        fmt.Sprintf("Operator signed in to session %s", sessionID.String()),
+		CreatedBy:    req.SignedByID,
+		DeviceID:     uuid.Nil,
+		EventType:    "operator_signin",
+		SessionID:    &sessionID,
+	}
+
+	if err := h.logRepo.CreateLog(c.Context(), log); err != nil {
+		// Log the error but don't fail the sign-in
+		fmt.Printf("Failed to create sign-in log: %v\n", err)
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"success": true,
+		"data":    signIn,
+	})
+}
+
+// SignOutOperator signs out an operator from a session
+// @Summary Sign out operator
+// @Description Signs out an operator from their current session
+// @Tags operator-sessions
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Session ID (UUID)"
+// @Param operator_id query string true "Operator ID (UUID)"
+// @Success 200 {object} map[string]interface{} "Operator signed out"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden"
+// @Failure 404 {object} map[string]interface{} "Operator not signed in"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /operator-sessions/{id}/sign-out [post]
+func (h *OperatorSessionHandler) SignOutOperator(c *fiber.Ctx) error {
+	sessionIDStr := c.Params("id")
+	sessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid session ID",
+		})
+	}
+
+	operatorIDStr := c.Query("operator_id")
+	operatorID, err := uuid.Parse(operatorIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid operator ID",
+		})
+	}
+
+	if err := h.sessionRepo.SignOutOperator(c.Context(), sessionID, operatorID); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to sign out operator",
+		})
+	}
+
+	userID := c.Locals("user_id").(uuid.UUID)
+
+	// Create log entry for sign-out
+	log := &models.Log{
+		LogDate:      time.Now(),
+		LogTime:      time.Now().Format("15:04:05"),
+		StationID:    uuid.Nil,
+		OperatorName: "System",
+		Action:       "Operator Sign-Out",
+		Event:        fmt.Sprintf("Operator signed out from session %s", sessionID.String()),
+		CreatedBy:    userID,
+		DeviceID:     uuid.Nil,
+		EventType:    "operator_signout",
+		SessionID:    &sessionID,
+	}
+
+	if err := h.logRepo.CreateLog(c.Context(), log); err != nil {
+		fmt.Printf("Failed to create sign-out log: %v\n", err)
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"message": "Operator signed out successfully",
+	})
+}
+
+// GetSignedInOperators retrieves operators signed in to a session
+// @Summary Get signed in operators
+// @Description Retrieves all operators currently signed in to a session
+// @Tags operator-sessions
+// @Security BearerAuth
+// @Produce json
+// @Param id path string true "Session ID (UUID)"
+// @Success 200 {object} map[string]interface{} "List of signed in operators"
+// @Failure 400 {object} map[string]interface{} "Invalid session ID"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /operator-sessions/{id}/operators [get]
+func (h *OperatorSessionHandler) GetSignedInOperators(c *fiber.Ctx) error {
+	sessionIDStr := c.Params("id")
+	sessionID, err := uuid.Parse(sessionIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid session ID",
+		})
+	}
+
+	operators, err := h.sessionRepo.GetSignedInOperators(c.Context(), sessionID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to get signed in operators",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    operators,
 	})
 }

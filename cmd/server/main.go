@@ -22,19 +22,60 @@
 package main
 
 import (
+	"context"
 	"log"
+	"os"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/cors"
-	fiberSwagger "github.com/swaggo/fiber-swagger"
 	_ "e-logging-app/docs" // ← ADD THIS
 	"e-logging-app/internal/config"
 	"e-logging-app/internal/db"
 	"e-logging-app/internal/handlers"
 	"e-logging-app/internal/middleware"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	fiberSwagger "github.com/swaggo/fiber-swagger"
 )
 
+func runMigrations() {
+	// Load configuration from .env file (for DB_URL)
+	_, err := config.LoadConfig()
+	if err != nil {
+		log.Fatal("Failed to load configuration:", err)
+	}
+
+	// Initialize database
+	database, err := db.NewDatabase()
+	if err != nil {
+		log.Fatal("Failed to connect to database:", err)
+	}
+	defer database.Close()
+
+	// Run migrations
+	migrations := []string{
+		"migrations/001_initial_schema.sql",
+		"migrations/003_add_operator_signin_system.sql",
+		"migrations/004_add_shift_summary_system.sql",
+	}
+
+	for _, migration := range migrations {
+		log.Printf("Running migration: %s", migration)
+		if err := database.RunMigration(context.Background(), migration); err != nil {
+			log.Fatalf("Failed to run migration %s: %v", migration, err)
+		}
+		log.Printf("Successfully ran migration: %s", migration)
+	}
+
+	log.Println("All migrations completed successfully")
+}
+
 func main() {
+	// Check for migration command
+	if len(os.Args) > 1 && os.Args[1] == "migrate" {
+		runMigrations()
+		return
+	}
+
 	// Load configuration from .env file
 	cfg, err := config.LoadConfig()
 	if err != nil {
@@ -53,15 +94,19 @@ func main() {
 	stationRepo := db.NewStationRepository(database)
 	deviceRepo := db.NewDeviceRepository(database)
 	logRepo := db.NewLogRepository(database)
+	sessionRepo := db.NewOperatorSessionRepository(database)
+	shiftSummaryRepo := db.NewShiftSummaryRepository(database)
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(userRepo, deviceRepo)
-	logHandler := handlers.NewLogHandler(logRepo, deviceRepo)
+	logHandler := handlers.NewLogHandler(logRepo, deviceRepo, sessionRepo, userRepo)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	deviceHandler := handlers.NewDeviceHandler(deviceRepo)
 	userHandler := handlers.NewUserHandler(userRepo)
 	sttHandler := handlers.NewSTTHandler()
 	dashboardHandler := handlers.NewDashboardHandler(logRepo)
+	sessionHandler := handlers.NewOperatorSessionHandler(sessionRepo, userRepo, logRepo)
+	shiftSummaryHandler := handlers.NewShiftSummaryHandler(shiftSummaryRepo, logRepo, stationRepo, userRepo)
 
 	// Initialize Fiber app
 	app := fiber.New()
@@ -121,6 +166,22 @@ func main() {
 	// Dashboard
 	dashboardGroup := api.Group("/dashboard")
 	dashboardGroup.Get("/stats", dashboardHandler.GetDashboardStats)
+
+	// Operator Sessions
+	sessionsGroup := api.Group("/operator-sessions")
+	sessionsGroup.Get("/", sessionHandler.GetActiveSessions)
+	sessionsGroup.Post("/", middleware.RoleMiddleware("admin"), sessionHandler.CreateOperatorSession)
+	sessionsGroup.Delete("/:id", middleware.RoleMiddleware("admin"), sessionHandler.EndOperatorSession)
+	sessionsGroup.Post("/:id/sign-in", middleware.RoleMiddleware("operator", "admin"), sessionHandler.SignInOperator)
+	sessionsGroup.Post("/:id/sign-out", middleware.RoleMiddleware("operator", "admin"), sessionHandler.SignOutOperator)
+	sessionsGroup.Get("/:id/operators", sessionHandler.GetSignedInOperators)
+
+	// Shift Summary
+	summaryGroup := api.Group("/shift-summary")
+	summaryGroup.Post("/", middleware.RoleMiddleware("admin"), shiftSummaryHandler.CreateShiftSummary)
+	summaryGroup.Get("/:id", shiftSummaryHandler.GetShiftSummary)
+	summaryGroup.Get("/session/:sessionId", shiftSummaryHandler.GetSessionShiftSummary)
+	summaryGroup.Get("/stations/generation", shiftSummaryHandler.GetGenerationStations)
 
 	// Swagger documentation
 	app.Get("/swagger/*", fiberSwagger.WrapHandler)

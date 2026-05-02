@@ -29,3 +29,17 @@ func NewDatabase() (*Database, error) {
 func (d *Database) Close() {
 	d.Pool.Close()
 }
+
+func (d *Database) RunMigration(ctx context.Context, migrationPath string) error {
+	migrationSQL, err := os.ReadFile(migrationPath)
+	if err != nil {
+		return fmt.Errorf("failed to read migration file: %w", err)
+	}
+
+	_, err = d.Pool.Exec(ctx, string(migrationSQL))
+	if err != nil {
+		return fmt.Errorf("failed to execute migration: %w", err)
+	}
+
+	return nil
+}

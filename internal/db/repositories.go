@@ -40,6 +40,28 @@ type LogRepository interface {
 	GetDashboardStats(ctx context.Context) (*models.DashboardStats, error)
 }
 
+type OperatorSessionRepository interface {
+	CreateSession(ctx context.Context, session *models.OperatorSession) error
+	GetSessionByID(ctx context.Context, id uuid.UUID) (*models.OperatorSession, error)
+	GetActiveSessions(ctx context.Context) ([]*models.OperatorSession, error)
+	EndSession(ctx context.Context, id uuid.UUID) error
+	SignInOperator(ctx context.Context, signIn *models.OperatorSignIn) error
+	SignOutOperator(ctx context.Context, sessionID, operatorID uuid.UUID) error
+	GetSignedInOperators(ctx context.Context, sessionID uuid.UUID) ([]*models.SignedInOperator, error)
+	GetOperatorCurrentSession(ctx context.Context, operatorID uuid.UUID) (*models.OperatorSession, error)
+	GetActiveSessionCount(ctx context.Context, date time.Time) (int, error)
+}
+
+type ShiftSummaryRepository interface {
+	CreateShiftSummary(ctx context.Context, summary *models.ShiftSummary) error
+	GetShiftSummaryByID(ctx context.Context, id uuid.UUID) (*models.ShiftSummary, error)
+	GetShiftSummaryBySessionID(ctx context.Context, sessionID uuid.UUID) (*models.ShiftSummary, error)
+	AddGenerationSummary(ctx context.Context, genSummary *models.GenerationSummary) error
+	GetGenerationSummaries(ctx context.Context, summaryID uuid.UUID) ([]*models.GenerationSummary, error)
+	AddNoteSummary(ctx context.Context, noteSummary *models.NoteSummary) error
+	GetNoteSummary(ctx context.Context, summaryID uuid.UUID) (*models.NoteSummary, error)
+}
+
 type userRepository struct {
 	db *Database
 }
@@ -53,6 +75,14 @@ type deviceRepository struct {
 }
 
 type logRepository struct {
+	db *Database
+}
+
+type operatorSessionRepository struct {
+	db *Database
+}
+
+type shiftSummaryRepository struct {
 	db *Database
 }
 
@@ -70,6 +100,14 @@ func NewDeviceRepository(db *Database) DeviceRepository {
 
 func NewLogRepository(db *Database) LogRepository {
 	return &logRepository{db: db}
+}
+
+func NewOperatorSessionRepository(db *Database) OperatorSessionRepository {
+	return &operatorSessionRepository{db: db}
+}
+
+func NewShiftSummaryRepository(db *Database) ShiftSummaryRepository {
+	return &shiftSummaryRepository{db: db}
 }
 
 func (r *userRepository) CreateUser(ctx context.Context, user *models.User) error {
@@ -123,7 +161,7 @@ func (r *stationRepository) CreateStation(ctx context.Context, station *models.S
 }
 
 func (r *stationRepository) GetStations(ctx context.Context) ([]*models.Station, error) {
-	query := `SELECT id, name FROM stations`
+	query := `SELECT id, name, station_type FROM stations`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -133,7 +171,7 @@ func (r *stationRepository) GetStations(ctx context.Context) ([]*models.Station,
 	var stations []*models.Station
 	for rows.Next() {
 		station := &models.Station{}
-		err := rows.Scan(&station.ID, &station.Name)
+		err := rows.Scan(&station.ID, &station.Name, &station.StationType)
 		if err != nil {
 			return nil, err
 		}
@@ -239,12 +277,12 @@ func (r *deviceRepository) DeactivateDevice(ctx context.Context, id uuid.UUID) e
 }
 
 func (r *logRepository) CreateLog(ctx context.Context, log *models.Log) error {
-	query := `INSERT INTO logs (log_date, log_time, station_id, operator_name, action, event, created_by, device_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at, updated_at`
-	return r.db.Pool.QueryRow(ctx, query, log.LogDate, log.LogTime, log.StationID, log.OperatorName, log.Action, log.Event, log.CreatedBy, log.DeviceID).Scan(&log.ID, &log.CreatedAt, &log.UpdatedAt)
+	query := `INSERT INTO logs (log_date, log_time, station_id, operator_name, action, event, created_by, device_id, event_type, session_id, is_summary, shift_summary_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, log.LogDate, log.LogTime, log.StationID, log.OperatorName, log.Action, log.Event, log.CreatedBy, log.DeviceID, log.EventType, log.SessionID, log.IsSummary, log.ShiftSummaryID).Scan(&log.ID, &log.CreatedAt, &log.UpdatedAt)
 }
 
 func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interface{}, sortBy string, order string, limit int, offset int) ([]*models.Log, error) {
-	query := `SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name, u.name
+	query := `SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name, u.name, l.event_type, l.session_id, l.is_summary, l.shift_summary_id
 	          FROM logs l
 	          LEFT JOIN stations s ON l.station_id = s.id
 	          LEFT JOIN users u ON l.created_by = u.id
@@ -311,7 +349,7 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 	var logs []*models.Log
 	for rows.Next() {
 		log := &models.Log{}
-		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName)
+		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID, &log.IsSummary, &log.ShiftSummaryID)
 		if err != nil {
 			return nil, err
 		}
@@ -328,8 +366,8 @@ func (r *logRepository) UpdateLog(ctx context.Context, id uuid.UUID, log *models
 
 func (r *logRepository) GetLogByID(ctx context.Context, id uuid.UUID) (*models.Log, error) {
 	log := &models.Log{}
-	query := `SELECT id, log_date, log_time, station_id, operator_name, action, event, created_by, created_at, updated_at, device_id FROM logs WHERE id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID)
+	query := `SELECT id, log_date, log_time, station_id, operator_name, action, event, created_by, created_at, updated_at, device_id, event_type, session_id FROM logs WHERE id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.EventType, &log.SessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -465,9 +503,9 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 
 	// Recent logs (last 10)
 	recentRows, err := r.db.Pool.Query(ctx, `
-		SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name as station_name, u.name as user_name
+		SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name as station_name, u.name as user_name, l.event_type, l.session_id
 		FROM logs l
-		JOIN stations s ON l.station_id = s.id
+		LEFT JOIN stations s ON l.station_id = s.id
 		LEFT JOIN users u ON l.created_by = u.id
 		ORDER BY l.created_at DESC
 		LIMIT 10
@@ -480,7 +518,7 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 	var recentLogs []*models.Log
 	for recentRows.Next() {
 		log := &models.Log{}
-		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName)
+		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan recent log: %w", err)
 		}
@@ -489,4 +527,189 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 	stats.RecentLogs = recentLogs
 
 	return stats, nil
+}
+
+// OperatorSessionRepository implementation
+func (r *operatorSessionRepository) CreateSession(ctx context.Context, session *models.OperatorSession) error {
+	query := `INSERT INTO operator_sessions (shift_lead_id, start_time, is_active, max_sign_ins) VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, session.ShiftLeadID, session.StartTime, session.IsActive, session.MaxSignIns).Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+}
+
+func (r *operatorSessionRepository) GetSessionByID(ctx context.Context, id uuid.UUID) (*models.OperatorSession, error) {
+	session := &models.OperatorSession{}
+	query := `SELECT id, shift_lead_id, start_time, end_time, is_active, max_sign_ins, created_at, updated_at FROM operator_sessions WHERE id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&session.ID, &session.ShiftLeadID, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+func (r *operatorSessionRepository) GetActiveSessions(ctx context.Context) ([]*models.OperatorSession, error) {
+	query := `SELECT id, shift_lead_id, start_time, end_time, is_active, max_sign_ins, created_at, updated_at FROM operator_sessions WHERE is_active = true ORDER BY start_time DESC`
+	rows, err := r.db.Pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []*models.OperatorSession
+	for rows.Next() {
+		session := &models.OperatorSession{}
+		err := rows.Scan(&session.ID, &session.ShiftLeadID, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
+}
+
+func (r *operatorSessionRepository) EndSession(ctx context.Context, id uuid.UUID) error {
+	query := `UPDATE operator_sessions SET end_time = NOW(), is_active = false, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Pool.Exec(ctx, query, id)
+	return err
+}
+
+func (r *operatorSessionRepository) SignInOperator(ctx context.Context, signIn *models.OperatorSignIn) error {
+	query := `INSERT INTO operator_sign_ins (session_id, operator_id, signed_by_id, signed_in_at, is_active) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, signIn.SessionID, signIn.OperatorID, signIn.SignedByID, signIn.SignedInAt, signIn.IsActive).Scan(&signIn.ID, &signIn.CreatedAt, &signIn.UpdatedAt)
+}
+
+func (r *operatorSessionRepository) SignOutOperator(ctx context.Context, sessionID, operatorID uuid.UUID) error {
+	query := `UPDATE operator_sign_ins SET signed_out_at = NOW(), is_active = false, updated_at = NOW() WHERE session_id = $1 AND operator_id = $2 AND is_active = true`
+	_, err := r.db.Pool.Exec(ctx, query, sessionID, operatorID)
+	return err
+}
+
+func (r *operatorSessionRepository) GetSignedInOperators(ctx context.Context, sessionID uuid.UUID) ([]*models.SignedInOperator, error) {
+	query := `SELECT u.id, u.name, si.signed_in_at
+	          FROM operator_sign_ins si
+	          JOIN users u ON si.operator_id = u.id
+	          WHERE si.session_id = $1 AND si.is_active = true
+	          ORDER BY si.signed_in_at ASC`
+	rows, err := r.db.Pool.Query(ctx, query, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var operators []*models.SignedInOperator
+	for rows.Next() {
+		operator := &models.SignedInOperator{}
+		err := rows.Scan(&operator.ID, &operator.Name, &operator.SignedInAt)
+		if err != nil {
+			return nil, err
+		}
+		operators = append(operators, operator)
+	}
+	return operators, nil
+}
+
+func (r *operatorSessionRepository) GetOperatorCurrentSession(ctx context.Context, operatorID uuid.UUID) (*models.OperatorSession, error) {
+	session := &models.OperatorSession{}
+	query := `SELECT os.id, os.shift_lead_id, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at
+	          FROM operator_sessions os
+	          JOIN operator_sign_ins si ON os.id = si.session_id
+	          WHERE si.operator_id = $1 AND si.is_active = true AND os.is_active = true
+	          LIMIT 1`
+	err := r.db.Pool.QueryRow(ctx, query, operatorID).Scan(&session.ID, &session.ShiftLeadID, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+func (r *operatorSessionRepository) GetActiveSessionCount(ctx context.Context, date time.Time) (int, error) {
+	count := 0
+	query := `SELECT COUNT(*) FROM operator_sessions WHERE DATE(start_time) = $1 AND is_active = true`
+	err := r.db.Pool.QueryRow(ctx, query, date.Format("2006-01-02")).Scan(&count)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+// ShiftSummaryRepository implementation
+func (r *shiftSummaryRepository) CreateShiftSummary(ctx context.Context, summary *models.ShiftSummary) error {
+	query := `INSERT INTO shift_summary (session_id, created_by, summary_date, summary_time, shift_note) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, summary.SessionID, summary.CreatedBy, summary.SummaryDate, summary.SummaryTime, summary.ShiftNote).Scan(&summary.ID, &summary.CreatedAt, &summary.UpdatedAt)
+}
+
+func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uuid.UUID) (*models.ShiftSummary, error) {
+	summary := &models.ShiftSummary{}
+	query := `SELECT id, session_id, created_by, summary_date, summary_time, shift_note, created_at, updated_at FROM shift_summary WHERE id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get associated generation summaries
+	genSummaries, err := r.GetGenerationSummaries(ctx, id)
+	if err == nil {
+		summary.GenerationStations = genSummaries
+	}
+
+	return summary, nil
+}
+
+func (r *shiftSummaryRepository) GetShiftSummaryBySessionID(ctx context.Context, sessionID uuid.UUID) (*models.ShiftSummary, error) {
+	summary := &models.ShiftSummary{}
+	query := `SELECT id, session_id, created_by, summary_date, summary_time, shift_note, created_at, updated_at FROM shift_summary WHERE session_id = $1 LIMIT 1`
+	err := r.db.Pool.QueryRow(ctx, query, sessionID).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get associated generation summaries
+	genSummaries, err := r.GetGenerationSummaries(ctx, summary.ID)
+	if err == nil {
+		summary.GenerationStations = genSummaries
+	}
+
+	return summary, nil
+}
+
+func (r *shiftSummaryRepository) AddGenerationSummary(ctx context.Context, genSummary *models.GenerationSummary) error {
+	query := `INSERT INTO generation_summary (shift_summary_id, station_id, running_units, reserve_energy_mw) VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, genSummary.ShiftSummaryID, genSummary.StationID, genSummary.RunningUnits, genSummary.ReserveEnergyMW).Scan(&genSummary.ID, &genSummary.CreatedAt, &genSummary.UpdatedAt)
+}
+
+func (r *shiftSummaryRepository) GetGenerationSummaries(ctx context.Context, summaryID uuid.UUID) ([]*models.GenerationSummary, error) {
+	query := `SELECT gs.id, gs.shift_summary_id, gs.station_id, s.name, gs.running_units, gs.reserve_energy_mw, gs.created_at, gs.updated_at
+	          FROM generation_summary gs
+	          JOIN stations s ON gs.station_id = s.id
+	          WHERE gs.shift_summary_id = $1
+	          ORDER BY s.name ASC`
+	rows, err := r.db.Pool.Query(ctx, query, summaryID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []*models.GenerationSummary
+	for rows.Next() {
+		genSummary := &models.GenerationSummary{}
+		err := rows.Scan(&genSummary.ID, &genSummary.ShiftSummaryID, &genSummary.StationID, &genSummary.StationName, &genSummary.RunningUnits, &genSummary.ReserveEnergyMW, &genSummary.CreatedAt, &genSummary.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		summaries = append(summaries, genSummary)
+	}
+	return summaries, nil
+}
+
+func (r *shiftSummaryRepository) AddNoteSummary(ctx context.Context, noteSummary *models.NoteSummary) error {
+	query := `INSERT INTO note_summary (shift_summary_id, note_text) VALUES ($1, $2) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, noteSummary.ShiftSummaryID, noteSummary.NoteText).Scan(&noteSummary.ID, &noteSummary.CreatedAt, &noteSummary.UpdatedAt)
+}
+
+func (r *shiftSummaryRepository) GetNoteSummary(ctx context.Context, summaryID uuid.UUID) (*models.NoteSummary, error) {
+	noteSummary := &models.NoteSummary{}
+	query := `SELECT id, shift_summary_id, note_text, created_at, updated_at FROM note_summary WHERE shift_summary_id = $1 LIMIT 1`
+	err := r.db.Pool.QueryRow(ctx, query, summaryID).Scan(&noteSummary.ID, &noteSummary.ShiftSummaryID, &noteSummary.NoteText, &noteSummary.CreatedAt, &noteSummary.UpdatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return noteSummary, nil
 }
