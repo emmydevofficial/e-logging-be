@@ -56,6 +56,7 @@ func runMigrations() {
 		"migrations/001_initial_schema.sql",
 		"migrations/003_add_operator_signin_system.sql",
 		"migrations/004_add_shift_summary_system.sql",
+		"migrations/005_fix_logs_constraints.sql",
 	}
 
 	for _, migration := range migrations {

@@ -277,12 +277,21 @@ func (r *deviceRepository) DeactivateDevice(ctx context.Context, id uuid.UUID) e
 }
 
 func (r *logRepository) CreateLog(ctx context.Context, log *models.Log) error {
+	var stationID interface{} = log.StationID
+	if log.StationID == uuid.Nil {
+		stationID = nil
+	}
+	var deviceID interface{} = log.DeviceID
+	if log.DeviceID == uuid.Nil {
+		deviceID = nil
+	}
+	
 	query := `INSERT INTO logs (log_date, log_time, station_id, operator_name, action, event, created_by, device_id, event_type, session_id, is_summary, shift_summary_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at, updated_at`
-	return r.db.Pool.QueryRow(ctx, query, log.LogDate, log.LogTime, log.StationID, log.OperatorName, log.Action, log.Event, log.CreatedBy, log.DeviceID, log.EventType, log.SessionID, log.IsSummary, log.ShiftSummaryID).Scan(&log.ID, &log.CreatedAt, &log.UpdatedAt)
+	return r.db.Pool.QueryRow(ctx, query, log.LogDate, log.LogTime, stationID, log.OperatorName, log.Action, log.Event, log.CreatedBy, deviceID, log.EventType, log.SessionID, log.IsSummary, log.ShiftSummaryID).Scan(&log.ID, &log.CreatedAt, &log.UpdatedAt)
 }
 
 func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interface{}, sortBy string, order string, limit int, offset int) ([]*models.Log, error) {
-	query := `SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name, u.name, l.event_type, l.session_id, l.is_summary, l.shift_summary_id
+	query := `SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id, COALESCE(l.is_summary, false), l.shift_summary_id
 	          FROM logs l
 	          LEFT JOIN stations s ON l.station_id = s.id
 	          LEFT JOIN users u ON l.created_by = u.id
@@ -424,7 +433,7 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 
 	// Last entry info
 	var lastEntryTime time.Time
-	var lastEntryStationID uuid.UUID
+	var lastEntryStationID *uuid.UUID
 	var lastEntryOperator string
 	err = r.db.Pool.QueryRow(ctx, `
 		SELECT created_at, station_id, operator_name
@@ -437,10 +446,12 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 		stats.LastEntryOperator = lastEntryOperator
 
 		// Get station name
-		var stationName string
-		err = r.db.Pool.QueryRow(ctx, "SELECT name FROM stations WHERE id = $1", lastEntryStationID).Scan(&stationName)
-		if err == nil {
-			stats.LastEntryStation = stationName
+		if lastEntryStationID != nil {
+			var stationName string
+			err = r.db.Pool.QueryRow(ctx, "SELECT name FROM stations WHERE id = $1", *lastEntryStationID).Scan(&stationName)
+			if err == nil {
+				stats.LastEntryStation = stationName
+			}
 		}
 	}
 
@@ -503,7 +514,7 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 
 	// Recent logs (last 10)
 	recentRows, err := r.db.Pool.Query(ctx, `
-		SELECT l.id, l.log_date, l.log_time, l.station_id, l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, l.device_id, s.name as station_name, u.name as user_name, l.event_type, l.session_id
+		SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id
 		FROM logs l
 		LEFT JOIN stations s ON l.station_id = s.id
 		LEFT JOIN users u ON l.created_by = u.id
@@ -638,7 +649,7 @@ func (r *shiftSummaryRepository) CreateShiftSummary(ctx context.Context, summary
 
 func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uuid.UUID) (*models.ShiftSummary, error) {
 	summary := &models.ShiftSummary{}
-	query := `SELECT id, session_id, created_by, summary_date, summary_time, shift_note, created_at, updated_at FROM shift_summary WHERE id = $1`
+	query := `SELECT id, session_id, created_by, summary_date::text, summary_time::text, COALESCE(shift_note, ''), created_at, updated_at FROM shift_summary WHERE id = $1`
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
 	if err != nil {
 		return nil, err
@@ -655,7 +666,7 @@ func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uui
 
 func (r *shiftSummaryRepository) GetShiftSummaryBySessionID(ctx context.Context, sessionID uuid.UUID) (*models.ShiftSummary, error) {
 	summary := &models.ShiftSummary{}
-	query := `SELECT id, session_id, created_by, summary_date, summary_time, shift_note, created_at, updated_at FROM shift_summary WHERE session_id = $1 LIMIT 1`
+	query := `SELECT id, session_id, created_by, summary_date::text, summary_time::text, COALESCE(shift_note, ''), created_at, updated_at FROM shift_summary WHERE session_id = $1 LIMIT 1`
 	err := r.db.Pool.QueryRow(ctx, query, sessionID).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
 	if err != nil {
 		return nil, err

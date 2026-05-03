@@ -1,7 +1,78 @@
 basePath: /api
 definitions:
+  handlers.CreateShiftSummaryRequest:
+    properties:
+      generation_summaries:
+        items:
+          $ref: '#/definitions/handlers.GenerationSummaryRequest'
+        type: array
+      session_id:
+        type: string
+      shift_note:
+        type: string
+      summary_date:
+        type: string
+      summary_time:
+        type: string
+    type: object
+  handlers.GenerationStationListResponse:
+    properties:
+      station_id:
+        type: string
+      station_name:
+        type: string
+    type: object
+  handlers.GenerationStationResponse:
+    properties:
+      reserve_energy_mw:
+        type: number
+      running_units:
+        type: integer
+      station_id:
+        type: string
+      station_name:
+        type: string
+    type: object
+  handlers.GenerationSummaryRequest:
+    properties:
+      reserve_energy_mw:
+        type: number
+      running_units:
+        type: integer
+      station_id:
+        type: string
+    type: object
+  handlers.ShiftSummaryResponse:
+    properties:
+      created_at:
+        type: string
+      created_by:
+        type: string
+      created_by_name:
+        type: string
+      generation_stations:
+        items:
+          $ref: '#/definitions/handlers.GenerationStationResponse'
+        type: array
+      id:
+        type: string
+      session_id:
+        type: string
+      shift_note:
+        type: string
+      summary_date:
+        type: string
+      summary_time:
+        type: string
+      updated_at:
+        type: string
+    type: object
   models.Device:
     properties:
+      can_download:
+        type: boolean
+      can_log:
+        type: boolean
       device_name:
         type: string
       fingerprint:
@@ -27,17 +98,29 @@ definitions:
         type: string
       event:
         type: string
+      event_type:
+        type: string
       id:
         type: string
+      is_summary:
+        type: boolean
       log_date:
         type: string
       log_time:
         type: string
       operator_name:
         type: string
+      session_id:
+        type: string
+      shift_summary_id:
+        type: string
       station_id:
         type: string
+      station_name:
+        type: string
       updated_at:
+        type: string
+      user_name:
         type: string
     type: object
   models.Station:
@@ -45,6 +128,8 @@ definitions:
       id:
         type: string
       name:
+        type: string
+      station_type:
         type: string
     type: object
 host: localhost:3000
@@ -179,6 +264,33 @@ paths:
       summary: Refresh access token
       tags:
       - auth
+  /dashboard/stats:
+    get:
+      description: Retrieves comprehensive dashboard statistics including logs, stations,
+        operators, and activity data
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Dashboard statistics
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get dashboard statistics
+      tags:
+      - dashboard
   /devices:
     get:
       description: Retrieves a list of all registered devices (admin only)
@@ -296,6 +408,55 @@ paths:
       summary: Deactivate device
       tags:
       - devices
+    put:
+      consumes:
+      - application/json
+      description: Updates device fields using partial updates (admin only)
+      parameters:
+      - description: Device ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Device update data
+        in: body
+        name: device
+        required: true
+        schema:
+          type: object
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Updated device
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden (admin only)
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Update device
+      tags:
+      - devices
   /logs:
     get:
       description: Retrieves logs with optional filtering, sorting, and pagination
@@ -321,6 +482,14 @@ paths:
       - description: Filter logs until date (YYYY-MM-DD)
         in: query
         name: date_to
+        type: string
+      - description: Filter logs from hour (0-23)
+        in: query
+        name: time_from
+        type: string
+      - description: Filter logs until hour (0-23)
+        in: query
+        name: time_to
         type: string
       - default: 10
         description: Limit number of results
@@ -481,6 +650,14 @@ paths:
         in: query
         name: date_to
         type: string
+      - description: Filter from hour (0-23)
+        in: query
+        name: time_from
+        type: string
+      - description: Filter until hour (0-23)
+        in: query
+        name: time_to
+        type: string
       produces:
       - text/csv
       responses:
@@ -513,6 +690,386 @@ paths:
       summary: Export logs to CSV
       tags:
       - logs
+  /operator-sessions:
+    get:
+      description: Retrieves all currently active operator sessions
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of active sessions
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get active sessions
+      tags:
+      - operator-sessions
+    post:
+      consumes:
+      - application/json
+      description: Creates a new operator session for shift management (admin only)
+      parameters:
+      - description: Session data
+        in: body
+        name: session
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created session
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request body
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden (admin only)
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Create operator session
+      tags:
+      - operator-sessions
+  /operator-sessions/{id}:
+    delete:
+      description: Ends an active operator session (admin only)
+      parameters:
+      - description: Session ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Session ended
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid session ID
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden (admin only)
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Session not found
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: End operator session
+      tags:
+      - operator-sessions
+  /operator-sessions/{id}/operators:
+    get:
+      description: Retrieves all operators currently signed in to a session
+      parameters:
+      - description: Session ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: List of signed in operators
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid session ID
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Get signed in operators
+      tags:
+      - operator-sessions
+  /operator-sessions/{id}/sign-in:
+    post:
+      consumes:
+      - application/json
+      description: Signs in an operator to an active session
+      parameters:
+      - description: Session ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Sign in data
+        in: body
+        name: signin
+        required: true
+        schema:
+          additionalProperties: true
+          type: object
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Operator signed in
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+        "409":
+          description: Operator already signed in or session full
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Sign in operator
+      tags:
+      - operator-sessions
+  /operator-sessions/{id}/sign-out:
+    post:
+      description: Signs out an operator from their current session
+      parameters:
+      - description: Session ID (UUID)
+        in: path
+        name: id
+        required: true
+        type: string
+      - description: Operator ID (UUID)
+        in: query
+        name: operator_id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: Operator signed out
+          schema:
+            additionalProperties: true
+            type: object
+        "400":
+          description: Invalid request
+          schema:
+            additionalProperties: true
+            type: object
+        "401":
+          description: Unauthorized
+          schema:
+            additionalProperties: true
+            type: object
+        "403":
+          description: Forbidden
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Operator not signed in
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal server error
+          schema:
+            additionalProperties: true
+            type: object
+      security:
+      - BearerAuth: []
+      summary: Sign out operator
+      tags:
+      - operator-sessions
+  /shift-summary:
+    post:
+      consumes:
+      - application/json
+      description: Create a shift summary with generation station running units and
+        reserve energy
+      parameters:
+      - description: Shift summary details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/handlers.CreateShiftSummaryRequest'
+      produces:
+      - application/json
+      responses:
+        "201":
+          description: Created
+          schema:
+            $ref: '#/definitions/handlers.ShiftSummaryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Create shift summary
+      tags:
+      - Shift Summary
+  /shift-summary/{id}:
+    get:
+      consumes:
+      - application/json
+      description: Get a shift summary with all generation station details
+      parameters:
+      - description: Summary ID
+        in: path
+        name: id
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ShiftSummaryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get shift summary
+      tags:
+      - Shift Summary
+  /shift-summary/session/{sessionId}:
+    get:
+      consumes:
+      - application/json
+      description: Get the shift summary associated with a specific operator session
+      parameters:
+      - description: Session ID
+        in: path
+        name: sessionId
+        required: true
+        type: string
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/handlers.ShiftSummaryResponse'
+        "400":
+          description: Bad Request
+          schema:
+            additionalProperties: true
+            type: object
+        "404":
+          description: Not Found
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get session shift summary
+      tags:
+      - Shift Summary
+  /shift-summary/stations/generation:
+    get:
+      consumes:
+      - application/json
+      description: Get all stations with type "Generation" for shift summary creation
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              $ref: '#/definitions/handlers.GenerationStationListResponse'
+            type: array
+        "500":
+          description: Internal Server Error
+          schema:
+            additionalProperties: true
+            type: object
+      summary: Get generation stations
+      tags:
+      - Shift Summary
   /stations:
     get:
       description: Retrieves a list of all stations

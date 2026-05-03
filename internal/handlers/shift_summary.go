@@ -49,7 +49,7 @@ type ShiftSummaryResponse struct {
 	SummaryDate        string                      `json:"summary_date"`
 	SummaryTime        string                      `json:"summary_time"`
 	ShiftNote          string                      `json:"shift_note"`
-	GenerationStations []GenerationStationResponse `json:"generation_stations"`
+	GenerationStations []GenerationStationResponse `json:"generation_summaries"`
 	CreatedAt          time.Time                   `json:"created_at"`
 	UpdatedAt          time.Time                   `json:"updated_at"`
 }
@@ -74,8 +74,8 @@ type GenerationStationListResponse struct {
 // @Produce json
 // @Param request body CreateShiftSummaryRequest true "Shift summary details"
 // @Success 201 {object} ShiftSummaryResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 400 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
 // @Router /shift-summary [post]
 func (h *ShiftSummaryHandler) CreateShiftSummary(c *fiber.Ctx) error {
 	req := &CreateShiftSummaryRequest{}
@@ -159,6 +159,17 @@ func (h *ShiftSummaryHandler) CreateShiftSummary(c *fiber.Ctx) error {
 
 	h.logRepo.CreateLog(ctx, auditLog)
 
+	if req.ShiftNote != "" {
+		noteSummary := &models.NoteSummary{
+			ID:             uuid.New(),
+			ShiftSummaryID: summary.ID,
+			NoteText:       req.ShiftNote,
+			CreatedAt:      time.Now(),
+			UpdatedAt:      time.Now(),
+		}
+		h.shiftSummaryRepo.AddNoteSummary(ctx, noteSummary)
+	}
+
 	// Get creator's name
 	creator, _ := h.userRepo.GetUserByID(ctx, userID)
 	creatorName := ""
@@ -225,8 +236,8 @@ func (h *ShiftSummaryHandler) CreateShiftSummary(c *fiber.Ctx) error {
 // @Produce json
 // @Param id path string true "Summary ID"
 // @Success 200 {object} ShiftSummaryResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
 // @Router /shift-summary/{id} [get]
 func (h *ShiftSummaryHandler) GetShiftSummary(c *fiber.Ctx) error {
 	idStr := c.Params("id")
@@ -307,8 +318,8 @@ func (h *ShiftSummaryHandler) GetShiftSummary(c *fiber.Ctx) error {
 // @Produce json
 // @Param sessionId path string true "Session ID"
 // @Success 200 {object} ShiftSummaryResponse
-// @Failure 400 {object} ErrorResponse
-// @Failure 404 {object} ErrorResponse
+// @Failure 400 {object} map[string]interface{}
+// @Failure 404 {object} map[string]interface{}
 // @Router /shift-summary/session/{sessionId} [get]
 func (h *ShiftSummaryHandler) GetSessionShiftSummary(c *fiber.Ctx) error {
 	sessionIDStr := c.Params("sessionId")
@@ -388,7 +399,7 @@ func (h *ShiftSummaryHandler) GetSessionShiftSummary(c *fiber.Ctx) error {
 // @Accept json
 // @Produce json
 // @Success 200 {array} GenerationStationListResponse
-// @Failure 500 {object} ErrorResponse
+// @Failure 500 {object} map[string]interface{}
 // @Router /shift-summary/stations/generation [get]
 func (h *ShiftSummaryHandler) GetGenerationStations(c *fiber.Ctx) error {
 	ctx := context.Background()
