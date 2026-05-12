@@ -1097,10 +1097,20 @@ func (h *STTHandler) Transcribe(c *fiber.Ctx) error {
 		})
 	}
 
+	paraphrasedText, err := paraphraseText(transcription)
+	if err != nil {
+		// If paraphrasing fails, we could just return the raw transcription,
+		// but let's return an error for now to be safe, or fallback.
+		// Let's fallback to the raw transcription so the user doesn't lose their data.
+		fmt.Printf("Paraphrasing failed: %v\n", err)
+		paraphrasedText = transcription
+	}
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
-			"transcription": transcription,
+			"transcription": paraphrasedText,
+			"raw_text":      transcription, // Optional: return raw text as well just in case
 		},
 	})
 }
