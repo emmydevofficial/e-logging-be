@@ -57,6 +57,8 @@ func runMigrations() {
 		"migrations/003_add_operator_signin_system.sql",
 		"migrations/004_add_shift_summary_system.sql",
 		"migrations/005_fix_logs_constraints.sql",
+		"migrations/006_add_supervisor_role.sql",
+		"migrations/007_track_session_creators_and_enders.sql",
 	}
 
 	for _, migration := range migrations {
@@ -140,7 +142,7 @@ func main() {
 	// Logs
 	logsGroup := api.Group("/logs")
 	logsGroup.Get("/", logHandler.GetLogs)
-	logsGroup.Post("/", middleware.DeviceFingerprintMiddleware(deviceRepo), middleware.RoleMiddleware("operator", "admin"), logHandler.CreateLog)
+	logsGroup.Post("/", middleware.DeviceFingerprintMiddleware(deviceRepo), middleware.RoleMiddleware("operator", "supervisor", "admin"), logHandler.CreateLog)
 	logsGroup.Put("/:id", logHandler.UpdateLog)
 	logsGroup.Get("/export", middleware.RoleMiddleware("downloader", "admin"), logHandler.ExportLogs)
 
@@ -171,15 +173,16 @@ func main() {
 	// Operator Sessions
 	sessionsGroup := api.Group("/operator-sessions")
 	sessionsGroup.Get("/", sessionHandler.GetActiveSessions)
-	sessionsGroup.Post("/", middleware.RoleMiddleware("admin"), sessionHandler.CreateOperatorSession)
-	sessionsGroup.Delete("/:id", middleware.RoleMiddleware("admin"), sessionHandler.EndOperatorSession)
-	sessionsGroup.Post("/:id/sign-in", middleware.RoleMiddleware("operator", "admin"), sessionHandler.SignInOperator)
-	sessionsGroup.Post("/:id/sign-out", middleware.RoleMiddleware("operator", "admin"), sessionHandler.SignOutOperator)
+	sessionsGroup.Post("/", middleware.RoleMiddleware("admin", "supervisor"), sessionHandler.CreateOperatorSession)
+	sessionsGroup.Delete("/:id", middleware.RoleMiddleware("admin", "supervisor"), sessionHandler.EndOperatorSession)
+	sessionsGroup.Post("/:id/sign-in", middleware.RoleMiddleware("operator", "supervisor", "admin"), sessionHandler.SignInOperator)
+	sessionsGroup.Post("/:id/sign-out", middleware.RoleMiddleware("operator", "supervisor", "admin"), sessionHandler.SignOutOperator)
 	sessionsGroup.Get("/:id/operators", sessionHandler.GetSignedInOperators)
 
 	// Shift Summary
 	summaryGroup := api.Group("/shift-summary")
-	summaryGroup.Post("/", middleware.RoleMiddleware("admin"), shiftSummaryHandler.CreateShiftSummary)
+	summaryGroup.Get("/", shiftSummaryHandler.GetAllShiftSummaries)
+	summaryGroup.Post("/", middleware.RoleMiddleware("admin", "supervisor"), shiftSummaryHandler.CreateShiftSummary)
 	summaryGroup.Get("/:id", shiftSummaryHandler.GetShiftSummary)
 	summaryGroup.Get("/session/:sessionId", shiftSummaryHandler.GetSessionShiftSummary)
 	summaryGroup.Get("/stations/generation", shiftSummaryHandler.GetGenerationStations)

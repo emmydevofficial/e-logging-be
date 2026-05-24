@@ -44,18 +44,20 @@ type OperatorSessionRepository interface {
 	CreateSession(ctx context.Context, session *models.OperatorSession) error
 	GetSessionByID(ctx context.Context, id uuid.UUID) (*models.OperatorSession, error)
 	GetActiveSessions(ctx context.Context) ([]*models.OperatorSession, error)
-	EndSession(ctx context.Context, id uuid.UUID) error
+	EndSession(ctx context.Context, id uuid.UUID, endedByID uuid.UUID) error
 	SignInOperator(ctx context.Context, signIn *models.OperatorSignIn) error
 	SignOutOperator(ctx context.Context, sessionID, operatorID uuid.UUID) error
 	GetSignedInOperators(ctx context.Context, sessionID uuid.UUID) ([]*models.SignedInOperator, error)
 	GetOperatorCurrentSession(ctx context.Context, operatorID uuid.UUID) (*models.OperatorSession, error)
 	GetActiveSessionCount(ctx context.Context, date time.Time) (int, error)
+	GetAllSessions(ctx context.Context) ([]*models.OperatorSession, error)
 }
 
 type ShiftSummaryRepository interface {
 	CreateShiftSummary(ctx context.Context, summary *models.ShiftSummary) error
 	GetShiftSummaryByID(ctx context.Context, id uuid.UUID) (*models.ShiftSummary, error)
 	GetShiftSummaryBySessionID(ctx context.Context, sessionID uuid.UUID) (*models.ShiftSummary, error)
+	GetShiftSummaries(ctx context.Context) ([]*models.ShiftSummary, error)
 	AddGenerationSummary(ctx context.Context, genSummary *models.GenerationSummary) error
 	GetGenerationSummaries(ctx context.Context, summaryID uuid.UUID) ([]*models.GenerationSummary, error)
 	AddNoteSummary(ctx context.Context, noteSummary *models.NoteSummary) error
@@ -548,8 +550,12 @@ func (r *operatorSessionRepository) CreateSession(ctx context.Context, session *
 
 func (r *operatorSessionRepository) GetSessionByID(ctx context.Context, id uuid.UUID) (*models.OperatorSession, error) {
 	session := &models.OperatorSession{}
-	query := `SELECT id, shift_lead_id, start_time, end_time, is_active, max_sign_ins, created_at, updated_at FROM operator_sessions WHERE id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&session.ID, &session.ShiftLeadID, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
+	          FROM operator_sessions os
+	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
+	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
+	          WHERE os.id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -557,7 +563,12 @@ func (r *operatorSessionRepository) GetSessionByID(ctx context.Context, id uuid.
 }
 
 func (r *operatorSessionRepository) GetActiveSessions(ctx context.Context) ([]*models.OperatorSession, error) {
-	query := `SELECT id, shift_lead_id, start_time, end_time, is_active, max_sign_ins, created_at, updated_at FROM operator_sessions WHERE is_active = true ORDER BY start_time DESC`
+	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
+	          FROM operator_sessions os
+	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
+	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
+	          WHERE os.is_active = true 
+	          ORDER BY os.start_time DESC`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -567,7 +578,7 @@ func (r *operatorSessionRepository) GetActiveSessions(ctx context.Context) ([]*m
 	var sessions []*models.OperatorSession
 	for rows.Next() {
 		session := &models.OperatorSession{}
-		err := rows.Scan(&session.ID, &session.ShiftLeadID, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+		err := rows.Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -576,9 +587,9 @@ func (r *operatorSessionRepository) GetActiveSessions(ctx context.Context) ([]*m
 	return sessions, nil
 }
 
-func (r *operatorSessionRepository) EndSession(ctx context.Context, id uuid.UUID) error {
-	query := `UPDATE operator_sessions SET end_time = NOW(), is_active = false, updated_at = NOW() WHERE id = $1`
-	_, err := r.db.Pool.Exec(ctx, query, id)
+func (r *operatorSessionRepository) EndSession(ctx context.Context, id uuid.UUID, endedByID uuid.UUID) error {
+	query := `UPDATE operator_sessions SET end_time = NOW(), is_active = false, ended_by_id = $2, updated_at = NOW() WHERE id = $1`
+	_, err := r.db.Pool.Exec(ctx, query, id, endedByID)
 	return err
 }
 
@@ -619,12 +630,14 @@ func (r *operatorSessionRepository) GetSignedInOperators(ctx context.Context, se
 
 func (r *operatorSessionRepository) GetOperatorCurrentSession(ctx context.Context, operatorID uuid.UUID) (*models.OperatorSession, error) {
 	session := &models.OperatorSession{}
-	query := `SELECT os.id, os.shift_lead_id, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at
+	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at
 	          FROM operator_sessions os
 	          JOIN operator_sign_ins si ON os.id = si.session_id
+	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
+	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
 	          WHERE si.operator_id = $1 AND si.is_active = true AND os.is_active = true
 	          LIMIT 1`
-	err := r.db.Pool.QueryRow(ctx, query, operatorID).Scan(&session.ID, &session.ShiftLeadID, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+	err := r.db.Pool.QueryRow(ctx, query, operatorID).Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -633,12 +646,36 @@ func (r *operatorSessionRepository) GetOperatorCurrentSession(ctx context.Contex
 
 func (r *operatorSessionRepository) GetActiveSessionCount(ctx context.Context, date time.Time) (int, error) {
 	count := 0
-	query := `SELECT COUNT(*) FROM operator_sessions WHERE DATE(start_time) = $1 AND is_active = true`
-	err := r.db.Pool.QueryRow(ctx, query, date.Format("2006-01-02")).Scan(&count)
+	query := `SELECT COUNT(*) FROM operator_sessions WHERE is_active = true`
+	err := r.db.Pool.QueryRow(ctx, query).Scan(&count)
 	if err != nil {
 		return 0, err
 	}
 	return count, nil
+}
+
+func (r *operatorSessionRepository) GetAllSessions(ctx context.Context) ([]*models.OperatorSession, error) {
+	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
+	          FROM operator_sessions os
+	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
+	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
+	          ORDER BY os.start_time DESC`
+	rows, err := r.db.Pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var sessions []*models.OperatorSession
+	for rows.Next() {
+		session := &models.OperatorSession{}
+		err := rows.Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		sessions = append(sessions, session)
+	}
+	return sessions, nil
 }
 
 // ShiftSummaryRepository implementation
@@ -649,8 +686,11 @@ func (r *shiftSummaryRepository) CreateShiftSummary(ctx context.Context, summary
 
 func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uuid.UUID) (*models.ShiftSummary, error) {
 	summary := &models.ShiftSummary{}
-	query := `SELECT id, session_id, created_by, summary_date::text, summary_time::text, COALESCE(shift_note, ''), created_at, updated_at FROM shift_summary WHERE id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at 
+	          FROM shift_summary s
+	          LEFT JOIN users u ON s.created_by = u.id
+	          WHERE s.id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -666,8 +706,11 @@ func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uui
 
 func (r *shiftSummaryRepository) GetShiftSummaryBySessionID(ctx context.Context, sessionID uuid.UUID) (*models.ShiftSummary, error) {
 	summary := &models.ShiftSummary{}
-	query := `SELECT id, session_id, created_by, summary_date::text, summary_time::text, COALESCE(shift_note, ''), created_at, updated_at FROM shift_summary WHERE session_id = $1 LIMIT 1`
-	err := r.db.Pool.QueryRow(ctx, query, sessionID).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at 
+	          FROM shift_summary s
+	          LEFT JOIN users u ON s.created_by = u.id
+	          WHERE s.session_id = $1 LIMIT 1`
+	err := r.db.Pool.QueryRow(ctx, query, sessionID).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -679,6 +722,36 @@ func (r *shiftSummaryRepository) GetShiftSummaryBySessionID(ctx context.Context,
 	}
 
 	return summary, nil
+}
+
+func (r *shiftSummaryRepository) GetShiftSummaries(ctx context.Context) ([]*models.ShiftSummary, error) {
+	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at 
+	          FROM shift_summary s
+	          LEFT JOIN users u ON s.created_by = u.id
+	          ORDER BY s.summary_date DESC, s.summary_time DESC`
+	rows, err := r.db.Pool.Query(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var summaries []*models.ShiftSummary
+	for rows.Next() {
+		summary := &models.ShiftSummary{}
+		err := rows.Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+		if err != nil {
+			return nil, err
+		}
+		
+		// Fetch generation summaries for each shift summary
+		genSummaries, err := r.GetGenerationSummaries(ctx, summary.ID)
+		if err == nil {
+			summary.GenerationStations = genSummaries
+		}
+
+		summaries = append(summaries, summary)
+	}
+	return summaries, nil
 }
 
 func (r *shiftSummaryRepository) AddGenerationSummary(ctx context.Context, genSummary *models.GenerationSummary) error {

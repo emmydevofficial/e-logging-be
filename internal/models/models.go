@@ -82,14 +82,17 @@ type StationActivity struct {
 }
 
 type OperatorSession struct {
-	ID          uuid.UUID  `json:"id" db:"id"`
-	ShiftLeadID uuid.UUID  `json:"shift_lead_id" db:"shift_lead_id"`
-	StartTime   time.Time  `json:"start_time" db:"start_time"`
-	EndTime     *time.Time `json:"end_time" db:"end_time"`
-	IsActive    bool       `json:"is_active" db:"is_active"`
-	MaxSignIns  int        `json:"max_sign_ins" db:"max_sign_ins"`
-	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time  `json:"updated_at" db:"updated_at"`
+	ID            uuid.UUID  `json:"id" db:"id"`
+	ShiftLeadID   uuid.UUID  `json:"shift_lead_id" db:"shift_lead_id"`
+	ShiftLeadName string     `json:"shift_lead_name"`
+	EndedByID     *uuid.UUID `json:"ended_by_id" db:"ended_by_id"`
+	EndedByName   string     `json:"ended_by_name"`
+	StartTime     time.Time  `json:"start_time" db:"start_time"`
+	EndTime       *time.Time `json:"end_time" db:"end_time"`
+	IsActive      bool       `json:"is_active" db:"is_active"`
+	MaxSignIns    int        `json:"max_sign_ins" db:"max_sign_ins"`
+	CreatedAt     time.Time  `json:"created_at" db:"created_at"`
+	UpdatedAt     time.Time  `json:"updated_at" db:"updated_at"`
 }
 
 type OperatorSignIn struct {
@@ -114,6 +117,7 @@ type ShiftSummary struct {
 	ID                 uuid.UUID            `json:"id" db:"id"`
 	SessionID          uuid.UUID            `json:"session_id" db:"session_id"`
 	CreatedBy          uuid.UUID            `json:"created_by" db:"created_by"`
+	CreatedByName      string               `json:"created_by_name"`
 	SummaryDate        string               `json:"summary_date" db:"summary_date"`
 	SummaryTime        string               `json:"summary_time" db:"summary_time"`
 	ShiftNote          string               `json:"shift_note" db:"shift_note"`

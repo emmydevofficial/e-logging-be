@@ -421,3 +421,55 @@ func (h *ShiftSummaryHandler) GetGenerationStations(c *fiber.Ctx) error {
 
 	return c.JSON(response)
 }
+
+// GetAllShiftSummaries retrieves all shift summaries
+// @Summary Get all shift summaries
+// @Description Get a list of all shift summaries
+// @Tags Shift Summary
+// @Accept json
+// @Produce json
+// @Success 200 {object} map[string]interface{}
+// @Failure 500 {object} map[string]interface{}
+// @Router /shift-summary [get]
+func (h *ShiftSummaryHandler) GetAllShiftSummaries(c *fiber.Ctx) error {
+	ctx := context.Background()
+	summaries, err := h.shiftSummaryRepo.GetShiftSummaries(ctx)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to get shift summaries: " + err.Error(),
+		})
+	}
+
+	var responseList []ShiftSummaryResponse
+	for _, s := range summaries {
+		var genResponse []GenerationStationResponse
+		for _, gs := range s.GenerationStations {
+			genResponse = append(genResponse, GenerationStationResponse{
+				StationID:       gs.StationID.String(),
+				StationName:     gs.StationName,
+				RunningUnits:    gs.RunningUnits,
+				ReserveEnergyMW: gs.ReserveEnergyMW,
+			})
+		}
+
+		responseList = append(responseList, ShiftSummaryResponse{
+			ID:                 s.ID.String(),
+			SessionID:          s.SessionID.String(),
+			CreatedBy:          s.CreatedBy.String(),
+			CreatedByName:      s.CreatedByName,
+			SummaryDate:        s.SummaryDate,
+			SummaryTime:        s.SummaryTime,
+			ShiftNote:          s.ShiftNote,
+			GenerationStations: genResponse,
+			CreatedAt:          s.CreatedAt,
+			UpdatedAt:          s.UpdatedAt,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    responseList,
+	})
+}
+

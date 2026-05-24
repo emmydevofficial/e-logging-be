@@ -439,8 +439,8 @@ func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 		})
 	}
 
-	// For non-admin users, check if they are signed in
-	if user.Role != "admin" {
+	// For non-admin and non-supervisor users, check if they are signed in
+	if user.Role != "admin" && user.Role != "supervisor" {
 		currentSession, err := h.sessionRepo.GetOperatorCurrentSession(c.Context(), userID)
 		if err != nil || currentSession == nil {
 			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
@@ -1213,11 +1213,21 @@ func (h *OperatorSessionHandler) CreateOperatorSession(c *fiber.Ctx) error {
 // @Failure 500 {object} map[string]interface{} "Internal server error"
 // @Router /operator-sessions [get]
 func (h *OperatorSessionHandler) GetActiveSessions(c *fiber.Ctx) error {
-	sessions, err := h.sessionRepo.GetActiveSessions(c.Context())
+	includeEnded := c.Query("include_ended") == "true"
+	
+	var sessions []*models.OperatorSession
+	var err error
+	
+	if includeEnded {
+		sessions, err = h.sessionRepo.GetAllSessions(c.Context())
+	} else {
+		sessions, err = h.sessionRepo.GetActiveSessions(c.Context())
+	}
+	
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
-			"error":   "Failed to get active sessions",
+			"error":   "Failed to get sessions",
 		})
 	}
 
@@ -1251,7 +1261,32 @@ func (h *OperatorSessionHandler) EndOperatorSession(c *fiber.Ctx) error {
 		})
 	}
 
-	if err := h.sessionRepo.EndSession(c.Context(), id); err != nil {
+	userID := c.Locals("user_id").(uuid.UUID)
+	userRole := c.Locals("role").(string)
+
+	if userRole != "admin" && userRole != "supervisor" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "Only Admins and Supervisors can end sessions",
+		})
+	}
+
+	session, err := h.sessionRepo.GetSessionByID(c.Context(), id)
+	if err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"error":   "Session not found",
+		})
+	}
+
+	if userRole == "supervisor" && session.ShiftLeadID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "Supervisors can only end sessions they created",
+		})
+	}
+
+	if err := h.sessionRepo.EndSession(c.Context(), id, userID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
 			"error":   "Failed to end session",
@@ -1300,6 +1335,16 @@ func (h *OperatorSessionHandler) SignInOperator(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "Invalid request body",
+		})
+	}
+
+	userID := c.Locals("user_id").(uuid.UUID)
+	userRole := c.Locals("role").(string)
+
+	if userRole == "operator" && req.OperatorID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "Operators can only sign in themselves",
 		})
 	}
 
@@ -1410,14 +1455,22 @@ func (h *OperatorSessionHandler) SignOutOperator(c *fiber.Ctx) error {
 		})
 	}
 
+	userID := c.Locals("user_id").(uuid.UUID)
+	userRole := c.Locals("role").(string)
+
+	if userRole == "operator" && operatorID != userID {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"success": false,
+			"error":   "Operators can only sign out themselves",
+		})
+	}
+
 	if err := h.sessionRepo.SignOutOperator(c.Context(), sessionID, operatorID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
 			"error":   "Failed to sign out operator",
 		})
 	}
-
-	userID := c.Locals("user_id").(uuid.UUID)
 
 	// Create log entry for sign-out
 	log := &models.Log{
