@@ -780,12 +780,37 @@ func (h *StationHandler) GetStations(c *fiber.Ctx) error {
 // @Failure 500 {object} map[string]interface{} "Internal server error"
 // @Router /stations [post]
 func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
-	var station models.Station
-	if err := c.BodyParser(&station); err != nil {
+	// Parse into a dynamic map to support both format types:
+	// Format 1 (new): { "name": "Station Name" }
+	// Format 2 (old compiled client): { "name": { "name": "Station Name" } }
+	var body map[string]interface{}
+	if err := c.BodyParser(&body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"success": false,
 			"error":   "Invalid request body",
 		})
+	}
+
+	var name string
+	if nameVal, ok := body["name"]; ok {
+		if nameStr, ok := nameVal.(string); ok {
+			name = nameStr
+		} else if nameMap, ok := nameVal.(map[string]interface{}); ok {
+			if nestedName, ok := nameMap["name"].(string); ok {
+				name = nestedName
+			}
+		}
+	}
+
+	if name == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Station name is required",
+		})
+	}
+
+	station := models.Station{
+		Name: name,
 	}
 
 	if err := h.stationRepo.CreateStation(c.Context(), &station); err != nil {

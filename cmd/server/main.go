@@ -60,6 +60,7 @@ func runMigrations() {
 		"migrations/006_add_supervisor_role.sql",
 		"migrations/007_track_session_creators_and_enders.sql",
 		"migrations/008_add_priority_level.sql",
+		"migrations/009_add_device_permissions.sql",
 	}
 
 	for _, migration := range migrations {
