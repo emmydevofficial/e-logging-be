@@ -213,8 +213,12 @@ func (r *userRepository) UpdateUser(ctx context.Context, id uuid.UUID, update *m
 }
 
 func (r *stationRepository) CreateStation(ctx context.Context, station *models.Station) error {
-	query := `INSERT INTO stations (name) VALUES ($1) RETURNING id`
-	return r.db.Pool.QueryRow(ctx, query, station.Name).Scan(&station.ID)
+	var stationType *string
+	if station.StationType != "" {
+		stationType = &station.StationType
+	}
+	query := `INSERT INTO stations (name, station_type) VALUES ($1, $2) RETURNING id`
+	return r.db.Pool.QueryRow(ctx, query, station.Name, stationType).Scan(&station.ID)
 }
 
 func (r *stationRepository) GetStations(ctx context.Context) ([]*models.Station, error) {

@@ -792,6 +792,9 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 	}
 
 	var name string
+	var stationType string
+
+	// Extract name and nested station_type if present
 	if nameVal, ok := body["name"]; ok {
 		if nameStr, ok := nameVal.(string); ok {
 			name = nameStr
@@ -799,6 +802,16 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 			if nestedName, ok := nameMap["name"].(string); ok {
 				name = nestedName
 			}
+			if nestedType, ok := nameMap["station_type"].(string); ok {
+				stationType = nestedType
+			}
+		}
+	}
+
+	// Extract station_type if at top-level
+	if stationType == "" {
+		if typeVal, ok := body["station_type"].(string); ok {
+			stationType = typeVal
 		}
 	}
 
@@ -809,8 +822,16 @@ func (h *StationHandler) CreateStation(c *fiber.Ctx) error {
 		})
 	}
 
+	if stationType != "" && stationType != "Generation" && stationType != "Transmission" && stationType != "Distribution" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid station type. Must be Generation, Transmission, or Distribution",
+		})
+	}
+
 	station := models.Station{
-		Name: name,
+		Name:        name,
+		StationType: stationType,
 	}
 
 	if err := h.stationRepo.CreateStation(c.Context(), &station); err != nil {
