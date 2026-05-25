@@ -1551,14 +1551,20 @@ func (h *OperatorSessionHandler) SignInOperator(c *fiber.Ctx) error {
 		})
 	}
 
+	operatorName := "System"
+	operatorUser, err := h.userRepo.GetUserByID(c.Context(), req.OperatorID)
+	if err == nil && operatorUser != nil {
+		operatorName = operatorUser.Name
+	}
+
 	// Create log entry for sign-in
 	log := &models.Log{
 		LogDate:      time.Now(),
 		LogTime:      time.Now().Format("15:04:05"),
 		StationID:    uuid.Nil, // Will be set by frontend or default station
-		OperatorName: "System",
+		OperatorName: operatorName,
 		Action:       "Operator Sign-In",
-		Event:        fmt.Sprintf("Operator signed in to session %s", sessionID.String()),
+		Event:        fmt.Sprintf("Operator %s signed in to session %s", operatorName, sessionID.String()),
 		CreatedBy:    req.SignedByID,
 		DeviceID:     uuid.Nil,
 		EventType:    "operator_signin",
@@ -1637,14 +1643,20 @@ func (h *OperatorSessionHandler) SignOutOperator(c *fiber.Ctx) error {
 		})
 	}
 
+	operatorName := "System"
+	operatorUser, err := h.userRepo.GetUserByID(c.Context(), operatorID)
+	if err == nil && operatorUser != nil {
+		operatorName = operatorUser.Name
+	}
+
 	// Create log entry for sign-out
 	log := &models.Log{
 		LogDate:      time.Now(),
 		LogTime:      time.Now().Format("15:04:05"),
 		StationID:    uuid.Nil,
-		OperatorName: "System",
+		OperatorName: operatorName,
 		Action:       "Operator Sign-Out",
-		Event:        fmt.Sprintf("Operator signed out from session %s", sessionID.String()),
+		Event:        fmt.Sprintf("Operator %s signed out from session %s", operatorName, sessionID.String()),
 		CreatedBy:    userID,
 		DeviceID:     uuid.Nil,
 		EventType:    "operator_signout",
