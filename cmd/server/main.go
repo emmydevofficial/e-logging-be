@@ -163,6 +163,7 @@ func main() {
 	usersGroup := api.Group("/users")
 	usersGroup.Get("/", middleware.RoleMiddleware("admin"), userHandler.GetUsers)
 	usersGroup.Post("/", middleware.RoleMiddleware("admin"), userHandler.CreateUser)
+	usersGroup.Put("/:id", middleware.RoleMiddleware("admin"), userHandler.UpdateUser)
 
 	// STT
 	api.Post("/stt", sttHandler.Transcribe)

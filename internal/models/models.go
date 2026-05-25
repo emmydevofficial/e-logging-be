@@ -41,6 +41,14 @@ type DeviceUpdate struct {
 	IsActive    *bool   `json:"is_active"`
 }
 
+type UserUpdate struct {
+	Name             *string    `json:"name"`
+	Email            *string    `json:"email"`
+	Role             *string    `json:"role"`
+	IsOperator       *bool      `json:"is_operator"`
+	CurrentSessionID *uuid.UUID `json:"current_session_id"`
+}
+
 type Log struct {
 	ID             uuid.UUID  `json:"id" db:"id"`
 	LogDate        time.Time  `json:"log_date" db:"log_date"`

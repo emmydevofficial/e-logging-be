@@ -16,6 +16,7 @@ type UserRepository interface {
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
 	GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error)
 	GetUsers(ctx context.Context) ([]*models.User, error)
+	UpdateUser(ctx context.Context, id uuid.UUID, update *models.UserUpdate) (*models.User, error)
 }
 
 type StationRepository interface {
@@ -113,14 +114,14 @@ func NewShiftSummaryRepository(db *Database) ShiftSummaryRepository {
 }
 
 func (r *userRepository) CreateUser(ctx context.Context, user *models.User) error {
-	query := `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, $4) RETURNING id, created_at`
-	return r.db.Pool.QueryRow(ctx, query, user.Name, user.Email, user.PasswordHash, user.Role).Scan(&user.ID, &user.CreatedAt)
+	query := `INSERT INTO users (name, email, password_hash, role, is_operator) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`
+	return r.db.Pool.QueryRow(ctx, query, user.Name, user.Email, user.PasswordHash, user.Role, user.IsOperator).Scan(&user.ID, &user.CreatedAt)
 }
 
 func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 	user := &models.User{}
-	query := `SELECT id, name, email, password_hash, role, created_at FROM users WHERE email = $1`
-	err := r.db.Pool.QueryRow(ctx, query, email).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	query := `SELECT id, name, email, password_hash, role, is_operator, created_at FROM users WHERE email = $1`
+	err := r.db.Pool.QueryRow(ctx, query, email).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Role, &user.IsOperator, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -129,8 +130,8 @@ func (r *userRepository) GetUserByEmail(ctx context.Context, email string) (*mod
 
 func (r *userRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*models.User, error) {
 	user := &models.User{}
-	query := `SELECT id, name, email, password_hash, role, created_at FROM users WHERE id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Role, &user.CreatedAt)
+	query := `SELECT id, name, email, password_hash, role, is_operator, created_at FROM users WHERE id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&user.ID, &user.Name, &user.Email, &user.PasswordHash, &user.Role, &user.IsOperator, &user.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +139,7 @@ func (r *userRepository) GetUserByID(ctx context.Context, id uuid.UUID) (*models
 }
 
 func (r *userRepository) GetUsers(ctx context.Context) ([]*models.User, error) {
-	query := `SELECT id, name, email, role, created_at FROM users`
+	query := `SELECT id, name, email, role, is_operator, created_at FROM users`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -148,13 +149,67 @@ func (r *userRepository) GetUsers(ctx context.Context) ([]*models.User, error) {
 	var users []*models.User
 	for rows.Next() {
 		user := &models.User{}
-		err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &user.CreatedAt)
+		err := rows.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &user.IsOperator, &user.CreatedAt)
 		if err != nil {
 			return nil, err
 		}
 		users = append(users, user)
 	}
 	return users, nil
+}
+
+func (r *userRepository) UpdateUser(ctx context.Context, id uuid.UUID, update *models.UserUpdate) (*models.User, error) {
+	if update == nil {
+		return r.GetUserByID(ctx, id)
+	}
+
+	fields := []string{}
+	args := []interface{}{}
+	argPos := 1
+
+	if update.Name != nil {
+		fields = append(fields, fmt.Sprintf("name = $%d", argPos))
+		args = append(args, *update.Name)
+		argPos++
+	}
+	if update.Email != nil {
+		fields = append(fields, fmt.Sprintf("email = $%d", argPos))
+		args = append(args, *update.Email)
+		argPos++
+	}
+	if update.Role != nil {
+		fields = append(fields, fmt.Sprintf("role = $%d", argPos))
+		args = append(args, *update.Role)
+		argPos++
+	}
+	if update.IsOperator != nil {
+		fields = append(fields, fmt.Sprintf("is_operator = $%d", argPos))
+		args = append(args, *update.IsOperator)
+		argPos++
+	}
+	if update.CurrentSessionID != nil {
+		fields = append(fields, fmt.Sprintf("current_session_id = $%d", argPos))
+		if *update.CurrentSessionID == uuid.Nil {
+			args = append(args, nil)
+		} else {
+			args = append(args, *update.CurrentSessionID)
+		}
+		argPos++
+	}
+
+	if len(fields) == 0 {
+		return r.GetUserByID(ctx, id)
+	}
+
+	query := fmt.Sprintf("UPDATE users SET %s WHERE id = $%d RETURNING id, name, email, role, is_operator, created_at", strings.Join(fields, ", "), argPos)
+	args = append(args, id)
+
+	user := &models.User{}
+	err := r.db.Pool.QueryRow(ctx, query, args...).Scan(&user.ID, &user.Name, &user.Email, &user.Role, &user.IsOperator, &user.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	return user, nil
 }
 
 func (r *stationRepository) CreateStation(ctx context.Context, station *models.Station) error {
@@ -188,7 +243,7 @@ func (r *deviceRepository) CreateDevice(ctx context.Context, device *models.Devi
 }
 
 func (r *deviceRepository) GetDevices(ctx context.Context) ([]*models.Device, error) {
-	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active FROM devices`
+	query := `SELECT id, device_name, fingerprint, registered_by, COALESCE(registered_at, NOW()), COALESCE(can_log, false), COALESCE(can_download, false), COALESCE(is_active, true) FROM devices`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
@@ -209,7 +264,7 @@ func (r *deviceRepository) GetDevices(ctx context.Context) ([]*models.Device, er
 
 func (r *deviceRepository) GetDeviceByFingerprint(ctx context.Context, fingerprint string) (*models.Device, error) {
 	device := &models.Device{}
-	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active FROM devices WHERE fingerprint = $1`
+	query := `SELECT id, device_name, fingerprint, registered_by, COALESCE(registered_at, NOW()), COALESCE(can_log, false), COALESCE(can_download, false), COALESCE(is_active, true) FROM devices WHERE fingerprint = $1`
 	err := r.db.Pool.QueryRow(ctx, query, fingerprint).Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
 	if err != nil {
 		return nil, err
@@ -219,7 +274,7 @@ func (r *deviceRepository) GetDeviceByFingerprint(ctx context.Context, fingerpri
 
 func (r *deviceRepository) GetDeviceByID(ctx context.Context, id uuid.UUID) (*models.Device, error) {
 	device := &models.Device{}
-	query := `SELECT id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active FROM devices WHERE id = $1`
+	query := `SELECT id, device_name, fingerprint, registered_by, COALESCE(registered_at, NOW()), COALESCE(can_log, false), COALESCE(can_download, false), COALESCE(is_active, true) FROM devices WHERE id = $1`
 	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&device.ID, &device.DeviceName, &device.Fingerprint, &device.RegisteredBy, &device.RegisteredAt, &device.CanLog, &device.CanDownload, &device.IsActive)
 	if err != nil {
 		return nil, err
@@ -261,7 +316,7 @@ func (r *deviceRepository) UpdateDevice(ctx context.Context, id uuid.UUID, updat
 		return r.GetDeviceByID(ctx, id)
 	}
 
-	query := fmt.Sprintf("UPDATE devices SET %s WHERE id = $%d RETURNING id, device_name, fingerprint, registered_by, registered_at, can_log, can_download, is_active", strings.Join(fields, ", "), argPos)
+	query := fmt.Sprintf("UPDATE devices SET %s WHERE id = $%d RETURNING id, device_name, fingerprint, registered_by, COALESCE(registered_at, NOW()), COALESCE(can_log, false), COALESCE(can_download, false), COALESCE(is_active, true)", strings.Join(fields, ", "), argPos)
 	args = append(args, id)
 
 	device := &models.Device{}

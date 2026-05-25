@@ -152,6 +152,13 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 
 	if deviceFingerprint != "" {
 		fingerprintValue = deviceFingerprint
+		defaultCanLog := false
+		defaultCanDownload := false
+		if user.Role == "admin" {
+			defaultCanLog = true
+			defaultCanDownload = true
+		}
+
 		device, err := h.deviceRepo.GetDeviceByFingerprint(c.Context(), deviceFingerprint)
 		if err != nil {
 			if deviceName == "" {
@@ -161,8 +168,8 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 				DeviceName:   deviceName,
 				Fingerprint:  deviceFingerprint,
 				RegisteredBy: user.ID,
-				CanLog:       false,
-				CanDownload:  false,
+				CanLog:       defaultCanLog,
+				CanDownload:  defaultCanDownload,
 				IsActive:     true,
 			}
 			if err := h.deviceRepo.CreateDevice(c.Context(), autoDevice); err != nil {
@@ -171,14 +178,33 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 				deviceID = autoDevice.ID.String()
 				isRegistered = true
 				isActive = autoDevice.IsActive
+				canLog = autoDevice.CanLog
+				canDownload = autoDevice.CanDownload
 			}
 		} else {
 			deviceID = device.ID.String()
 			isRegistered = true
+			isActive = device.IsActive
 			if device.IsActive {
-				canLog = device.CanLog
-				canDownload = device.CanDownload
-				isActive = true
+				if user.Role == "admin" && (!device.CanLog || !device.CanDownload) {
+					trueVal := true
+					update := &models.DeviceUpdate{
+						CanLog:      &trueVal,
+						CanDownload: &trueVal,
+					}
+					updatedDevice, err := h.deviceRepo.UpdateDevice(c.Context(), device.ID, update)
+					if err == nil {
+						canLog = updatedDevice.CanLog
+						canDownload = updatedDevice.CanDownload
+					} else {
+						fmt.Printf("failed to auto-enable device permissions for admin: %v\n", err)
+						canLog = device.CanLog
+						canDownload = device.CanDownload
+					}
+				} else {
+					canLog = device.CanLog
+					canDownload = device.CanDownload
+				}
 			}
 		}
 	}
@@ -979,10 +1005,11 @@ func (h *UserHandler) GetUsers(c *fiber.Ctx) error {
 // @Router /users [post]
 func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 	type CreateUserRequest struct {
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
-		Role     string `json:"role"`
+		Name       string `json:"name"`
+		Email      string `json:"email"`
+		Password   string `json:"password"`
+		Role       string `json:"role"`
+		IsOperator bool   `json:"is_operator"`
 	}
 
 	var req CreateUserRequest
@@ -1006,6 +1033,7 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 		Email:        req.Email,
 		PasswordHash: hashedPassword,
 		Role:         req.Role,
+		IsOperator:   req.IsOperator,
 	}
 
 	if err := h.userRepo.CreateUser(c.Context(), user); err != nil {
@@ -1018,6 +1046,54 @@ func (h *UserHandler) CreateUser(c *fiber.Ctx) error {
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    user,
+	})
+}
+
+// UpdateUser updates a user's details
+// @Summary Update user
+// @Description Updates user details by ID (admin only)
+// @Tags users
+// @Security BearerAuth
+// @Accept json
+// @Produce json
+// @Param id path string true "User ID (UUID)"
+// @Param user body models.UserUpdate true "User update data"
+// @Success 200 {object} map[string]interface{} "Updated user"
+// @Failure 400 {object} map[string]interface{} "Invalid request"
+// @Failure 401 {object} map[string]interface{} "Unauthorized"
+// @Failure 403 {object} map[string]interface{} "Forbidden (admin only)"
+// @Failure 404 {object} map[string]interface{} "User not found"
+// @Failure 500 {object} map[string]interface{} "Internal server error"
+// @Router /users/{id} [put]
+func (h *UserHandler) UpdateUser(c *fiber.Ctx) error {
+	userIDStr := c.Params("id")
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid user ID",
+		})
+	}
+
+	var req models.UserUpdate
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"error":   "Invalid request body",
+		})
+	}
+
+	updatedUser, err := h.userRepo.UpdateUser(c.Context(), userID, &req)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to update user",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data":    updatedUser,
 	})
 }
 
