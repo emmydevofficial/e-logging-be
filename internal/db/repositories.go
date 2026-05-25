@@ -218,7 +218,7 @@ func (r *stationRepository) CreateStation(ctx context.Context, station *models.S
 }
 
 func (r *stationRepository) GetStations(ctx context.Context) ([]*models.Station, error) {
-	query := `SELECT id, name, station_type FROM stations`
+	query := `SELECT id, name, COALESCE(station_type, '') FROM stations`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, err
