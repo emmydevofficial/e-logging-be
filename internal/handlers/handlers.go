@@ -1581,6 +1581,16 @@ func (h *OperatorSessionHandler) SignOutOperator(c *fiber.Ctx) error {
 	}
 
 	operatorIDStr := c.Query("operator_id")
+	if operatorIDStr == "" {
+		type SignOutRequest struct {
+			OperatorID string `json:"operator_id"`
+		}
+		var bodyReq SignOutRequest
+		if err := c.BodyParser(&bodyReq); err == nil {
+			operatorIDStr = bodyReq.OperatorID
+		}
+	}
+
 	operatorID, err := uuid.Parse(operatorIDStr)
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
