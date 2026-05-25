@@ -59,6 +59,7 @@ type Log struct {
 	SessionID      *uuid.UUID `json:"session_id" db:"session_id"`
 	IsSummary      bool       `json:"is_summary" db:"is_summary"`
 	ShiftSummaryID *uuid.UUID `json:"shift_summary_id" db:"shift_summary_id"`
+	PriorityLevel  *int       `json:"priority_level" db:"priority_level"`
 }
 
 type DashboardStats struct {

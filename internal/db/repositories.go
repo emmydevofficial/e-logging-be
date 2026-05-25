@@ -288,12 +288,12 @@ func (r *logRepository) CreateLog(ctx context.Context, log *models.Log) error {
 		deviceID = nil
 	}
 	
-	query := `INSERT INTO logs (log_date, log_time, station_id, operator_name, action, event, created_by, device_id, event_type, session_id, is_summary, shift_summary_id) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) RETURNING id, created_at, updated_at`
-	return r.db.Pool.QueryRow(ctx, query, log.LogDate, log.LogTime, stationID, log.OperatorName, log.Action, log.Event, log.CreatedBy, deviceID, log.EventType, log.SessionID, log.IsSummary, log.ShiftSummaryID).Scan(&log.ID, &log.CreatedAt, &log.UpdatedAt)
+	query := `INSERT INTO logs (log_date, log_time, station_id, operator_name, action, event, created_by, device_id, event_type, session_id, is_summary, shift_summary_id, priority_level) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING id, created_at, updated_at`
+	return r.db.Pool.QueryRow(ctx, query, log.LogDate, log.LogTime, stationID, log.OperatorName, log.Action, log.Event, log.CreatedBy, deviceID, log.EventType, log.SessionID, log.IsSummary, log.ShiftSummaryID, log.PriorityLevel).Scan(&log.ID, &log.CreatedAt, &log.UpdatedAt)
 }
 
 func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interface{}, sortBy string, order string, limit int, offset int) ([]*models.Log, error) {
-	query := `SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id, COALESCE(l.is_summary, false), l.shift_summary_id
+	query := `SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id, COALESCE(l.is_summary, false), l.shift_summary_id, l.priority_level
 	          FROM logs l
 	          LEFT JOIN stations s ON l.station_id = s.id
 	          LEFT JOIN users u ON l.created_by = u.id
@@ -331,6 +331,11 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 		query += fmt.Sprintf(" AND EXTRACT(HOUR FROM l.created_at) <= $%d", argCount)
 		args = append(args, timeTo)
 	}
+	if priorityLevel, ok := filters["priority_level"]; ok {
+		argCount++
+		query += fmt.Sprintf(" AND l.priority_level = $%d", argCount)
+		args = append(args, priorityLevel)
+	}
 
 	if sortBy == "" {
 		sortBy = "created_at"
@@ -360,7 +365,7 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 	var logs []*models.Log
 	for rows.Next() {
 		log := &models.Log{}
-		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID, &log.IsSummary, &log.ShiftSummaryID)
+		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID, &log.IsSummary, &log.ShiftSummaryID, &log.PriorityLevel)
 		if err != nil {
 			return nil, err
 		}
@@ -370,15 +375,15 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 }
 
 func (r *logRepository) UpdateLog(ctx context.Context, id uuid.UUID, log *models.Log) error {
-	query := `UPDATE logs SET log_date = $1, log_time = $2, station_id = $3, operator_name = $4, action = $5, event = $6, updated_at = NOW() WHERE id = $7`
-	_, err := r.db.Pool.Exec(ctx, query, log.LogDate, log.LogTime, log.StationID, log.OperatorName, log.Action, log.Event, id)
+	query := `UPDATE logs SET log_date = $1, log_time = $2, station_id = $3, operator_name = $4, action = $5, event = $6, priority_level = $7, updated_at = NOW() WHERE id = $8`
+	_, err := r.db.Pool.Exec(ctx, query, log.LogDate, log.LogTime, log.StationID, log.OperatorName, log.Action, log.Event, log.PriorityLevel, id)
 	return err
 }
 
 func (r *logRepository) GetLogByID(ctx context.Context, id uuid.UUID) (*models.Log, error) {
 	log := &models.Log{}
-	query := `SELECT id, log_date, log_time, station_id, operator_name, action, event, created_by, created_at, updated_at, device_id, event_type, session_id FROM logs WHERE id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.EventType, &log.SessionID)
+	query := `SELECT id, log_date, log_time, station_id, operator_name, action, event, created_by, created_at, updated_at, device_id, event_type, session_id, priority_level FROM logs WHERE id = $1`
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.EventType, &log.SessionID, &log.PriorityLevel)
 	if err != nil {
 		return nil, err
 	}

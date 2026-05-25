@@ -344,6 +344,18 @@ func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
 		}
 		filters["time_to"] = timeTo
 	}
+	
+	priorityLevelStr := c.Query("priority_level")
+	if priorityLevelStr != "" {
+		priorityLevel, err := strconv.Atoi(priorityLevelStr)
+		if err != nil || priorityLevel < 1 || priorityLevel > 6 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid priority_level, must be between 1 and 6",
+			})
+		}
+		filters["priority_level"] = priorityLevel
+	}
 
 	limit, err := strconv.Atoi(limitStr)
 	if err != nil {
@@ -391,12 +403,13 @@ func (h *LogHandler) GetLogs(c *fiber.Ctx) error {
 // @Router /logs [post]
 func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 	type CreateLogRequest struct {
-		LogDate      string    `json:"log_date"`
-		LogTime      string    `json:"log_time"`
-		StationID    uuid.UUID `json:"station_id"`
-		OperatorName string    `json:"operator_name"`
-		Action       string    `json:"action"`
-		Event        string    `json:"event"`
+		LogDate       string    `json:"log_date"`
+		LogTime       string    `json:"log_time"`
+		StationID     uuid.UUID `json:"station_id"`
+		OperatorName  string    `json:"operator_name"`
+		Action        string    `json:"action"`
+		Event         string    `json:"event"`
+		PriorityLevel *int      `json:"priority_level"`
 	}
 
 	var req CreateLogRequest
@@ -419,12 +432,13 @@ func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 	}
 
 	log := models.Log{
-		LogDate:      logDate,
-		LogTime:      req.LogTime,
-		StationID:    req.StationID,
-		OperatorName: req.OperatorName,
-		Action:       req.Action,
-		Event:        req.Event,
+		LogDate:       logDate,
+		LogTime:       req.LogTime,
+		StationID:     req.StationID,
+		OperatorName:  req.OperatorName,
+		Action:        req.Action,
+		Event:         req.Event,
+		PriorityLevel: req.PriorityLevel,
 	}
 
 	userID := c.Locals("user_id").(uuid.UUID)
@@ -494,12 +508,13 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 	}
 
 	type UpdateLogRequest struct {
-		LogDate      string    `json:"log_date"`
-		LogTime      string    `json:"log_time"`
-		StationID    uuid.UUID `json:"station_id"`
-		OperatorName string    `json:"operator_name"`
-		Action       string    `json:"action"`
-		Event        string    `json:"event"`
+		LogDate       string    `json:"log_date"`
+		LogTime       string    `json:"log_time"`
+		StationID     uuid.UUID `json:"station_id"`
+		OperatorName  string    `json:"operator_name"`
+		Action        string    `json:"action"`
+		Event         string    `json:"event"`
+		PriorityLevel *int      `json:"priority_level"`
 	}
 
 	var req UpdateLogRequest
@@ -522,12 +537,13 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 	}
 
 	log := models.Log{
-		LogDate:      logDate,
-		LogTime:      req.LogTime,
-		StationID:    req.StationID,
-		OperatorName: req.OperatorName,
-		Action:       req.Action,
-		Event:        req.Event,
+		LogDate:       logDate,
+		LogTime:       req.LogTime,
+		StationID:     req.StationID,
+		OperatorName:  req.OperatorName,
+		Action:        req.Action,
+		Event:         req.Event,
+		PriorityLevel: req.PriorityLevel,
 	}
 
 	existingLog, err := h.logRepo.GetLogByID(c.Context(), id)
@@ -648,6 +664,18 @@ func (h *LogHandler) ExportLogs(c *fiber.Ctx) error {
 		filters["time_to"] = timeTo
 	}
 
+	priorityLevelStr := c.Query("priority_level")
+	if priorityLevelStr != "" {
+		priorityLevel, err := strconv.Atoi(priorityLevelStr)
+		if err != nil || priorityLevel < 1 || priorityLevel > 6 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Invalid priority_level, must be between 1 and 6",
+			})
+		}
+		filters["priority_level"] = priorityLevel
+	}
+
 	logs, err := h.logRepo.GetLogs(c.Context(), filters, sortBy, order, 0, 0) // No limit for export
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -659,8 +687,12 @@ func (h *LogHandler) ExportLogs(c *fiber.Ctx) error {
 	// Generate CSV
 	var csvData strings.Builder
 	writer := csv.NewWriter(&csvData)
-	writer.Write([]string{"ID", "Date", "Time", "Station", "User", "Operator", "Action", "Event", "Created By", "Created At"})
+	writer.Write([]string{"ID", "Date", "Time", "Station", "User", "Operator", "Action", "Event", "Priority Level", "Created By", "Created At"})
 	for _, log := range logs {
+		priorityStr := ""
+		if log.PriorityLevel != nil {
+			priorityStr = strconv.Itoa(*log.PriorityLevel)
+		}
 		writer.Write([]string{
 			log.ID.String(),
 			log.LogDate.Format("2006-01-02"),
@@ -670,6 +702,7 @@ func (h *LogHandler) ExportLogs(c *fiber.Ctx) error {
 			log.OperatorName,
 			log.Action,
 			log.Event,
+			priorityStr,
 			log.CreatedBy.String(),
 			log.CreatedAt.Format(time.RFC3339),
 		})
