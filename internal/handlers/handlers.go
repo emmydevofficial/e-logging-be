@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"encoding/csv"
 	"fmt"
 	"log"
@@ -17,8 +18,9 @@ import (
 )
 
 type AuthHandler struct {
-	userRepo   db.UserRepository
-	deviceRepo db.DeviceRepository
+	userRepo     db.UserRepository
+	deviceRepo   db.DeviceRepository
+	activityRepo db.ActivityRepository
 }
 
 type DashboardHandler struct {
@@ -26,10 +28,11 @@ type DashboardHandler struct {
 }
 
 type LogHandler struct {
-	logRepo     db.LogRepository
-	deviceRepo  db.DeviceRepository
-	sessionRepo db.OperatorSessionRepository
-	userRepo    db.UserRepository
+	logRepo      db.LogRepository
+	deviceRepo   db.DeviceRepository
+	sessionRepo  db.OperatorSessionRepository
+	userRepo     db.UserRepository
+	activityRepo db.ActivityRepository
 }
 
 type StationHandler struct {
@@ -45,19 +48,20 @@ type UserHandler struct {
 }
 
 type OperatorSessionHandler struct {
-	sessionRepo db.OperatorSessionRepository
-	userRepo    db.UserRepository
-	logRepo     db.LogRepository
+	sessionRepo  db.OperatorSessionRepository
+	userRepo     db.UserRepository
+	logRepo      db.LogRepository
+	activityRepo db.ActivityRepository
 }
 
 type STTHandler struct{}
 
-func NewAuthHandler(userRepo db.UserRepository, deviceRepo db.DeviceRepository) *AuthHandler {
-	return &AuthHandler{userRepo: userRepo, deviceRepo: deviceRepo}
+func NewAuthHandler(userRepo db.UserRepository, deviceRepo db.DeviceRepository, activityRepo db.ActivityRepository) *AuthHandler {
+	return &AuthHandler{userRepo: userRepo, deviceRepo: deviceRepo, activityRepo: activityRepo}
 }
 
-func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository, sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository) *LogHandler {
-	return &LogHandler{logRepo: logRepo, deviceRepo: deviceRepo, sessionRepo: sessionRepo, userRepo: userRepo}
+func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository, sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository, activityRepo db.ActivityRepository) *LogHandler {
+	return &LogHandler{logRepo: logRepo, deviceRepo: deviceRepo, sessionRepo: sessionRepo, userRepo: userRepo, activityRepo: activityRepo}
 }
 
 func NewStationHandler(stationRepo db.StationRepository) *StationHandler {
@@ -80,8 +84,8 @@ func NewDashboardHandler(logRepo db.LogRepository) *DashboardHandler {
 	return &DashboardHandler{logRepo: logRepo}
 }
 
-func NewOperatorSessionHandler(sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository, logRepo db.LogRepository) *OperatorSessionHandler {
-	return &OperatorSessionHandler{sessionRepo: sessionRepo, userRepo: userRepo, logRepo: logRepo}
+func NewOperatorSessionHandler(sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository, logRepo db.LogRepository, activityRepo db.ActivityRepository) *OperatorSessionHandler {
+	return &OperatorSessionHandler{sessionRepo: sessionRepo, userRepo: userRepo, logRepo: logRepo, activityRepo: activityRepo}
 }
 
 // Login authenticates a user with email and password
@@ -209,6 +213,8 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 		}
 	}
 
+	recordActivity(c.Context(), h.activityRepo, &user.ID, user.Name, "login", fmt.Sprintf("User logged in (Role: %s)", user.Role), c.IP())
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"data": fiber.Map{
@@ -229,6 +235,21 @@ func (h *AuthHandler) Login(c *fiber.Ctx) error {
 				"is_active":     isActive,
 			},
 		},
+	})
+}
+
+func (h *AuthHandler) Logout(c *fiber.Ctx) error {
+	userID := c.Locals("user_id").(uuid.UUID)
+	user, err := h.userRepo.GetUserByID(c.Context(), userID)
+	var userName string
+	if err == nil && user != nil {
+		userName = user.Name
+	} else {
+		userName = "Unknown"
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, userName, "logout", "User logged out", c.IP())
+	return c.JSON(fiber.Map{
+		"success": true,
 	})
 }
 
@@ -501,6 +522,8 @@ func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 		})
 	}
 
+	recordActivity(c.Context(), h.activityRepo, &userID, user.Name, "create_log", fmt.Sprintf("Created log: %s | Action: %s", log.Event, log.Action), c.IP())
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    log,
@@ -588,10 +611,18 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 		})
 	}
 
-	if time.Since(existingLog.CreatedAt) > 24*time.Hour {
+	createdAtLocal := existingLog.CreatedAt.Local()
+	cutoffTime := time.Date(
+		createdAtLocal.Year(),
+		createdAtLocal.Month(),
+		createdAtLocal.Day()+1,
+		1, 0, 0, 0,
+		createdAtLocal.Location(),
+	)
+	if time.Now().After(cutoffTime) {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
 			"success": false,
-			"error":   "Cannot edit log after 24 hours",
+			"error":   "Cannot edit log after 01:00 AM of the next day",
 		})
 	}
 
@@ -601,6 +632,15 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 			"error":   "Failed to update log",
 		})
 	}
+
+	user, err := h.userRepo.GetUserByID(c.Context(), userID)
+	var userName string
+	if err == nil && user != nil {
+		userName = user.Name
+	} else {
+		userName = "Unknown"
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, userName, "update_log", fmt.Sprintf("Updated log (ID: %s) to: %s | Action: %s", id, log.Event, log.Action), c.IP())
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -1351,6 +1391,15 @@ func (h *OperatorSessionHandler) CreateOperatorSession(c *fiber.Ctx) error {
 		})
 	}
 
+	user, err := h.userRepo.GetUserByID(c.Context(), userID)
+	var userName string
+	if err == nil && user != nil {
+		userName = user.Name
+	} else {
+		userName = "Unknown"
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, userName, "create_session", fmt.Sprintf("Started shift session (ID: %s)", session.ID), c.IP())
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    session,
@@ -1447,6 +1496,15 @@ func (h *OperatorSessionHandler) EndOperatorSession(c *fiber.Ctx) error {
 			"error":   "Failed to end session",
 		})
 	}
+
+	user, err := h.userRepo.GetUserByID(c.Context(), userID)
+	var userName string
+	if err == nil && user != nil {
+		userName = user.Name
+	} else {
+		userName = "Unknown"
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, userName, "end_session", fmt.Sprintf("Ended shift session (ID: %s)", id), c.IP())
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -1576,6 +1634,15 @@ func (h *OperatorSessionHandler) SignInOperator(c *fiber.Ctx) error {
 		fmt.Printf("Failed to create sign-in log: %v\n", err)
 	}
 
+	signedByUser, err := h.userRepo.GetUserByID(c.Context(), userID)
+	var signedByName string
+	if err == nil && signedByUser != nil {
+		signedByName = signedByUser.Name
+	} else {
+		signedByName = "Unknown"
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, signedByName, "signin_operator", fmt.Sprintf("Signed in operator %s to session (ID: %s)", operatorName, sessionID), c.IP())
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
 		"data":    signIn,
@@ -1667,6 +1734,15 @@ func (h *OperatorSessionHandler) SignOutOperator(c *fiber.Ctx) error {
 		fmt.Printf("Failed to create sign-out log: %v\n", err)
 	}
 
+	signedOutByUser, err := h.userRepo.GetUserByID(c.Context(), userID)
+	var signedOutByName string
+	if err == nil && signedOutByUser != nil {
+		signedOutByName = signedOutByUser.Name
+	} else {
+		signedOutByName = "Unknown"
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, signedOutByName, "signout_operator", fmt.Sprintf("Signed out operator %s from session (ID: %s)", operatorName, sessionID), c.IP())
+
 	return c.JSON(fiber.Map{
 		"success": true,
 		"message": "Operator signed out successfully",
@@ -1707,4 +1783,53 @@ func (h *OperatorSessionHandler) GetSignedInOperators(c *fiber.Ctx) error {
 		"success": true,
 		"data":    operators,
 	})
+}
+
+type ActivityHandler struct {
+	activityRepo db.ActivityRepository
+}
+
+func NewActivityHandler(activityRepo db.ActivityRepository) *ActivityHandler {
+	return &ActivityHandler{activityRepo: activityRepo}
+}
+
+func (h *ActivityHandler) GetActivities(c *fiber.Ctx) error {
+	limit := c.QueryInt("limit", 25)
+	page := c.QueryInt("page", 1)
+	if limit <= 0 {
+		limit = 25
+	}
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	logs, total, err := h.activityRepo.GetActivities(c.Context(), limit, offset)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"error":   "Failed to retrieve activity logs",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"success": true,
+		"data": fiber.Map{
+			"logs":  logs,
+			"total": total,
+			"page":  page,
+			"limit": limit,
+		},
+	})
+}
+
+func recordActivity(ctx context.Context, repo db.ActivityRepository, userID *uuid.UUID, username, actionType, description, ipAddress string) {
+	activity := &models.ActivityLog{
+		UserID:      userID,
+		Username:    username,
+		ActionType:  actionType,
+		Description: description,
+		IPAddress:   ipAddress,
+	}
+	_ = repo.CreateActivity(ctx, activity)
 }

@@ -160,3 +160,13 @@ type GenerationStationSummary struct {
 	RunningUnits    int       `json:"running_units"`
 	ReserveEnergyMW float64   `json:"reserve_energy_mw"`
 }
+
+type ActivityLog struct {
+	ID          uuid.UUID  `json:"id" db:"id"`
+	UserID      *uuid.UUID `json:"user_id" db:"user_id"`
+	Username    string     `json:"username" db:"username"`
+	ActionType  string     `json:"action_type" db:"action_type"`
+	Description string     `json:"description" db:"description"`
+	IPAddress   string     `json:"ip_address" db:"ip_address"`
+	CreatedAt   time.Time  `json:"created_at" db:"created_at"`
+}

@@ -61,6 +61,8 @@ func runMigrations() {
 		"migrations/007_track_session_creators_and_enders.sql",
 		"migrations/008_add_priority_level.sql",
 		"migrations/009_add_device_permissions.sql",
+		"migrations/010_update_action_types.sql",
+		"migrations/011_add_activity_logs.sql",
 	}
 
 	for _, migration := range migrations {
@@ -101,17 +103,19 @@ func main() {
 	logRepo := db.NewLogRepository(database)
 	sessionRepo := db.NewOperatorSessionRepository(database)
 	shiftSummaryRepo := db.NewShiftSummaryRepository(database)
+	activityRepo := db.NewActivityRepository(database)
 
 	// Initialize handlers
-	authHandler := handlers.NewAuthHandler(userRepo, deviceRepo)
-	logHandler := handlers.NewLogHandler(logRepo, deviceRepo, sessionRepo, userRepo)
+	authHandler := handlers.NewAuthHandler(userRepo, deviceRepo, activityRepo)
+	logHandler := handlers.NewLogHandler(logRepo, deviceRepo, sessionRepo, userRepo, activityRepo)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	deviceHandler := handlers.NewDeviceHandler(deviceRepo)
 	userHandler := handlers.NewUserHandler(userRepo)
 	sttHandler := handlers.NewSTTHandler()
 	dashboardHandler := handlers.NewDashboardHandler(logRepo)
-	sessionHandler := handlers.NewOperatorSessionHandler(sessionRepo, userRepo, logRepo)
+	sessionHandler := handlers.NewOperatorSessionHandler(sessionRepo, userRepo, logRepo, activityRepo)
 	shiftSummaryHandler := handlers.NewShiftSummaryHandler(shiftSummaryRepo, logRepo, stationRepo, userRepo)
+	activityHandler := handlers.NewActivityHandler(activityRepo)
 
 	// Initialize Fiber app
 	app := fiber.New()
@@ -140,6 +144,12 @@ func main() {
 
 	// Protected routes
 	api := app.Group("/api", middleware.JWTMiddleware())
+
+	// Auth Logout
+	api.Post("/auth/logout", authHandler.Logout)
+
+	// Activities
+	api.Get("/activities", middleware.RoleMiddleware("admin"), activityHandler.GetActivities)
 
 	// Logs
 	logsGroup := api.Group("/logs")

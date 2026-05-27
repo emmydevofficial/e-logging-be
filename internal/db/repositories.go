@@ -65,6 +65,11 @@ type ShiftSummaryRepository interface {
 	GetNoteSummary(ctx context.Context, summaryID uuid.UUID) (*models.NoteSummary, error)
 }
 
+type ActivityRepository interface {
+	CreateActivity(ctx context.Context, activity *models.ActivityLog) error
+	GetActivities(ctx context.Context, limit int, offset int) ([]*models.ActivityLog, int, error)
+}
+
 type userRepository struct {
 	db *Database
 }
@@ -87,6 +92,14 @@ type operatorSessionRepository struct {
 
 type shiftSummaryRepository struct {
 	db *Database
+}
+
+type activityRepository struct {
+	db *Database
+}
+
+func NewActivityRepository(db *Database) ActivityRepository {
+	return &activityRepository{db: db}
 }
 
 func NewUserRepository(db *Database) UserRepository {
@@ -860,4 +873,39 @@ func (r *shiftSummaryRepository) GetNoteSummary(ctx context.Context, summaryID u
 		return nil, err
 	}
 	return noteSummary, nil
+}
+
+func (r *activityRepository) CreateActivity(ctx context.Context, activity *models.ActivityLog) error {
+	query := `INSERT INTO activity_logs (user_id, username, action_type, description, ip_address)
+              VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at`
+	return r.db.Pool.QueryRow(ctx, query, activity.UserID, activity.Username, activity.ActionType, activity.Description, activity.IPAddress).Scan(&activity.ID, &activity.CreatedAt)
+}
+
+func (r *activityRepository) GetActivities(ctx context.Context, limit int, offset int) ([]*models.ActivityLog, int, error) {
+	var total int
+	err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM activity_logs`).Scan(&total)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	query := `SELECT id, user_id, username, action_type, description, ip_address, created_at
+              FROM activity_logs
+              ORDER BY created_at DESC
+              LIMIT $1 OFFSET $2`
+	rows, err := r.db.Pool.Query(ctx, query, limit, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var logs []*models.ActivityLog
+	for rows.Next() {
+		al := &models.ActivityLog{}
+		err := rows.Scan(&al.ID, &al.UserID, &al.Username, &al.ActionType, &al.Description, &al.IPAddress, &al.CreatedAt)
+		if err != nil {
+			return nil, 0, err
+		}
+		logs = append(logs, al)
+	}
+	return logs, total, nil
 }
