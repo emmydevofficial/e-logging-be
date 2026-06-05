@@ -44,6 +44,7 @@ type GenerationSummaryRequest struct {
 type ShiftSummaryResponse struct {
 	ID                 string                      `json:"id"`
 	SessionID          string                      `json:"session_id"`
+	SessionCode        string                      `json:"session_code"`
 	CreatedBy          string                      `json:"created_by"`
 	CreatedByName      string                      `json:"created_by_name"`
 	SummaryDate        string                      `json:"summary_date"`
@@ -212,9 +213,17 @@ func (h *ShiftSummaryHandler) CreateShiftSummary(c *fiber.Ctx) error {
 		}
 	}
 
+	// Get session code by loading summary from database
+	dbSummary, err := h.shiftSummaryRepo.GetShiftSummaryByID(ctx, summary.ID)
+	sessionCode := ""
+	if err == nil && dbSummary != nil {
+		sessionCode = dbSummary.SessionCode
+	}
+
 	response := &ShiftSummaryResponse{
 		ID:                 summary.ID.String(),
 		SessionID:          summary.SessionID.String(),
+		SessionCode:        sessionCode,
 		CreatedBy:          summary.CreatedBy.String(),
 		CreatedByName:      creatorName,
 		SummaryDate:        summary.SummaryDate,
@@ -297,6 +306,7 @@ func (h *ShiftSummaryHandler) GetShiftSummary(c *fiber.Ctx) error {
 	response := &ShiftSummaryResponse{
 		ID:                 summary.ID.String(),
 		SessionID:          summary.SessionID.String(),
+		SessionCode:        summary.SessionCode,
 		CreatedBy:          summary.CreatedBy.String(),
 		CreatedByName:      creatorName,
 		SummaryDate:        summary.SummaryDate,
@@ -379,6 +389,7 @@ func (h *ShiftSummaryHandler) GetSessionShiftSummary(c *fiber.Ctx) error {
 	response := &ShiftSummaryResponse{
 		ID:                 summary.ID.String(),
 		SessionID:          summary.SessionID.String(),
+		SessionCode:        summary.SessionCode,
 		CreatedBy:          summary.CreatedBy.String(),
 		CreatedByName:      creatorName,
 		SummaryDate:        summary.SummaryDate,
@@ -456,6 +467,7 @@ func (h *ShiftSummaryHandler) GetAllShiftSummaries(c *fiber.Ctx) error {
 		responseList = append(responseList, ShiftSummaryResponse{
 			ID:                 s.ID.String(),
 			SessionID:          s.SessionID.String(),
+			SessionCode:        s.SessionCode,
 			CreatedBy:          s.CreatedBy.String(),
 			CreatedByName:      s.CreatedByName,
 			SummaryDate:        s.SummaryDate,

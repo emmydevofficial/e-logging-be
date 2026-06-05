@@ -65,6 +65,7 @@ type Log struct {
 	UserName       string     `json:"user_name"`
 	EventType      string     `json:"event_type" db:"event_type"`
 	SessionID      *uuid.UUID `json:"session_id" db:"session_id"`
+	SessionCode    string     `json:"session_code"`
 	IsSummary      bool       `json:"is_summary" db:"is_summary"`
 	ShiftSummaryID *uuid.UUID `json:"shift_summary_id" db:"shift_summary_id"`
 	PriorityLevel  *int       `json:"priority_level" db:"priority_level"`
@@ -92,6 +93,7 @@ type StationActivity struct {
 
 type OperatorSession struct {
 	ID            uuid.UUID  `json:"id" db:"id"`
+	SessionCode   string     `json:"session_code" db:"session_code"`
 	ShiftLeadID   uuid.UUID  `json:"shift_lead_id" db:"shift_lead_id"`
 	ShiftLeadName string     `json:"shift_lead_name"`
 	EndedByID     *uuid.UUID `json:"ended_by_id" db:"ended_by_id"`
@@ -125,6 +127,7 @@ type SignedInOperator struct {
 type ShiftSummary struct {
 	ID                 uuid.UUID            `json:"id" db:"id"`
 	SessionID          uuid.UUID            `json:"session_id" db:"session_id"`
+	SessionCode        string               `json:"session_code"`
 	CreatedBy          uuid.UUID            `json:"created_by" db:"created_by"`
 	CreatedByName      string               `json:"created_by_name"`
 	SummaryDate        string               `json:"summary_date" db:"summary_date"`

@@ -1398,7 +1398,7 @@ func (h *OperatorSessionHandler) CreateOperatorSession(c *fiber.Ctx) error {
 	} else {
 		userName = "Unknown"
 	}
-	recordActivity(c.Context(), h.activityRepo, &userID, userName, "create_session", fmt.Sprintf("Started shift session (ID: %s)", session.ID), c.IP())
+	recordActivity(c.Context(), h.activityRepo, &userID, userName, "create_session", fmt.Sprintf("Started shift session (Code: %s)", session.SessionCode), c.IP())
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
@@ -1490,6 +1490,13 @@ func (h *OperatorSessionHandler) EndOperatorSession(c *fiber.Ctx) error {
 		})
 	}
 
+	// Get session first to read its session code before ending it
+	session, sErr := h.sessionRepo.GetSessionByID(c.Context(), id)
+	sessionCode := id.String()[:8]
+	if sErr == nil && session != nil {
+		sessionCode = session.SessionCode
+	}
+
 	if err := h.sessionRepo.EndSession(c.Context(), id, userID); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
@@ -1504,7 +1511,7 @@ func (h *OperatorSessionHandler) EndOperatorSession(c *fiber.Ctx) error {
 	} else {
 		userName = "Unknown"
 	}
-	recordActivity(c.Context(), h.activityRepo, &userID, userName, "end_session", fmt.Sprintf("Ended shift session (ID: %s)", id), c.IP())
+	recordActivity(c.Context(), h.activityRepo, &userID, userName, "end_session", fmt.Sprintf("Ended shift session (Code: %s)", sessionCode), c.IP())
 
 	return c.JSON(fiber.Map{
 		"success": true,
@@ -1641,7 +1648,13 @@ func (h *OperatorSessionHandler) SignInOperator(c *fiber.Ctx) error {
 	} else {
 		signedByName = "Unknown"
 	}
-	recordActivity(c.Context(), h.activityRepo, &userID, signedByName, "signin_operator", fmt.Sprintf("Signed in operator %s to session (ID: %s)", operatorName, sessionID), c.IP())
+
+	session, sErr := h.sessionRepo.GetSessionByID(c.Context(), sessionID)
+	sessionCode := sessionID.String()[:8]
+	if sErr == nil && session != nil {
+		sessionCode = session.SessionCode
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, signedByName, "signin_operator", fmt.Sprintf("Signed in operator %s to session (Code: %s)", operatorName, sessionCode), c.IP())
 
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
 		"success": true,
@@ -1741,7 +1754,13 @@ func (h *OperatorSessionHandler) SignOutOperator(c *fiber.Ctx) error {
 	} else {
 		signedOutByName = "Unknown"
 	}
-	recordActivity(c.Context(), h.activityRepo, &userID, signedOutByName, "signout_operator", fmt.Sprintf("Signed out operator %s from session (ID: %s)", operatorName, sessionID), c.IP())
+
+	session, sErr := h.sessionRepo.GetSessionByID(c.Context(), sessionID)
+	sessionCode := sessionID.String()[:8]
+	if sErr == nil && session != nil {
+		sessionCode = session.SessionCode
+	}
+	recordActivity(c.Context(), h.activityRepo, &userID, signedOutByName, "signout_operator", fmt.Sprintf("Signed out operator %s from session (Code: %s)", operatorName, sessionCode), c.IP())
 
 	return c.JSON(fiber.Map{
 		"success": true,

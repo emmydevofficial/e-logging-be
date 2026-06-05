@@ -63,6 +63,8 @@ func runMigrations() {
 		"migrations/009_add_device_permissions.sql",
 		"migrations/010_update_action_types.sql",
 		"migrations/011_add_activity_logs.sql",
+		"migrations/012_insert_stations.sql",
+		"migrations/013_add_session_code.sql",
 	}
 
 	for _, migration := range migrations {

@@ -365,10 +365,11 @@ func (r *logRepository) CreateLog(ctx context.Context, log *models.Log) error {
 }
 
 func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interface{}, sortBy string, order string, limit int, offset int) ([]*models.Log, error) {
-	query := `SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id, COALESCE(l.is_summary, false), l.shift_summary_id, l.priority_level
+	query := `SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id, COALESCE(l.is_summary, false), l.shift_summary_id, l.priority_level, COALESCE(os.session_code, '')
 	          FROM logs l
 	          LEFT JOIN stations s ON l.station_id = s.id
 	          LEFT JOIN users u ON l.created_by = u.id
+	          LEFT JOIN operator_sessions os ON l.session_id = os.id
 	          WHERE 1=1`
 	args := []interface{}{}
 	argCount := 0
@@ -437,7 +438,7 @@ func (r *logRepository) GetLogs(ctx context.Context, filters map[string]interfac
 	var logs []*models.Log
 	for rows.Next() {
 		log := &models.Log{}
-		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID, &log.IsSummary, &log.ShiftSummaryID, &log.PriorityLevel)
+		err := rows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID, &log.IsSummary, &log.ShiftSummaryID, &log.PriorityLevel, &log.SessionCode)
 		if err != nil {
 			return nil, err
 		}
@@ -593,10 +594,11 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 
 	// Recent logs (last 10)
 	recentRows, err := r.db.Pool.Query(ctx, `
-		SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id
+		SELECT l.id, l.log_date, l.log_time, COALESCE(l.station_id, '00000000-0000-0000-0000-000000000000'::uuid), l.operator_name, l.action, l.event, l.created_by, l.created_at, l.updated_at, COALESCE(l.device_id, '00000000-0000-0000-0000-000000000000'::uuid), COALESCE(s.name, ''), COALESCE(u.name, ''), l.event_type, l.session_id, COALESCE(os.session_code, '')
 		FROM logs l
 		LEFT JOIN stations s ON l.station_id = s.id
 		LEFT JOIN users u ON l.created_by = u.id
+		LEFT JOIN operator_sessions os ON l.session_id = os.id
 		ORDER BY l.created_at DESC
 		LIMIT 10
 	`)
@@ -608,7 +610,7 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 	var recentLogs []*models.Log
 	for recentRows.Next() {
 		log := &models.Log{}
-		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID)
+		err := recentRows.Scan(&log.ID, &log.LogDate, &log.LogTime, &log.StationID, &log.OperatorName, &log.Action, &log.Event, &log.CreatedBy, &log.CreatedAt, &log.UpdatedAt, &log.DeviceID, &log.StationName, &log.UserName, &log.EventType, &log.SessionID, &log.SessionCode)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan recent log: %w", err)
 		}
@@ -621,18 +623,46 @@ func (r *logRepository) GetDashboardStats(ctx context.Context) (*models.Dashboar
 
 // OperatorSessionRepository implementation
 func (r *operatorSessionRepository) CreateSession(ctx context.Context, session *models.OperatorSession) error {
-	query := `INSERT INTO operator_sessions (shift_lead_id, start_time, is_active, max_sign_ins) VALUES ($1, $2, $3, $4) RETURNING id, created_at, updated_at`
-	return r.db.Pool.QueryRow(ctx, query, session.ShiftLeadID, session.StartTime, session.IsActive, session.MaxSignIns).Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+	// Start a database transaction to ensure atomicity
+	tx, err := r.db.Pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// Format local date for the query to count today's sessions
+	localTime := session.StartTime.Local()
+	dateKey := localTime.Format("2006-01-02")
+	dateFormatted := localTime.Format("02-01-2006")
+
+	// Count how many sessions were created on this day
+	var count int
+	countQuery := `SELECT COUNT(*) FROM operator_sessions WHERE start_time::date = $1::date`
+	err = tx.QueryRow(ctx, countQuery, dateKey).Scan(&count)
+	if err != nil {
+		return err
+	}
+
+	seq := count + 1
+	session.SessionCode = fmt.Sprintf("SESS-%s-%02d", dateFormatted, seq)
+
+	query := `INSERT INTO operator_sessions (shift_lead_id, start_time, is_active, max_sign_ins, session_code) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at, updated_at`
+	err = tx.QueryRow(ctx, query, session.ShiftLeadID, session.StartTime, session.IsActive, session.MaxSignIns, session.SessionCode).Scan(&session.ID, &session.CreatedAt, &session.UpdatedAt)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit(ctx)
 }
 
 func (r *operatorSessionRepository) GetSessionByID(ctx context.Context, id uuid.UUID) (*models.OperatorSession, error) {
 	session := &models.OperatorSession{}
-	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
+	query := `SELECT os.id, os.session_code, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
 	          FROM operator_sessions os
 	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
 	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
 	          WHERE os.id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&session.ID, &session.SessionCode, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +670,7 @@ func (r *operatorSessionRepository) GetSessionByID(ctx context.Context, id uuid.
 }
 
 func (r *operatorSessionRepository) GetActiveSessions(ctx context.Context) ([]*models.OperatorSession, error) {
-	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
+	query := `SELECT os.id, os.session_code, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
 	          FROM operator_sessions os
 	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
 	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
@@ -655,7 +685,7 @@ func (r *operatorSessionRepository) GetActiveSessions(ctx context.Context) ([]*m
 	var sessions []*models.OperatorSession
 	for rows.Next() {
 		session := &models.OperatorSession{}
-		err := rows.Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+		err := rows.Scan(&session.ID, &session.SessionCode, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -707,14 +737,14 @@ func (r *operatorSessionRepository) GetSignedInOperators(ctx context.Context, se
 
 func (r *operatorSessionRepository) GetOperatorCurrentSession(ctx context.Context, operatorID uuid.UUID) (*models.OperatorSession, error) {
 	session := &models.OperatorSession{}
-	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at
+	query := `SELECT os.id, os.session_code, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at
 	          FROM operator_sessions os
 	          JOIN operator_sign_ins si ON os.id = si.session_id
 	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
 	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
 	          WHERE si.operator_id = $1 AND si.is_active = true AND os.is_active = true
 	          LIMIT 1`
-	err := r.db.Pool.QueryRow(ctx, query, operatorID).Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+	err := r.db.Pool.QueryRow(ctx, query, operatorID).Scan(&session.ID, &session.SessionCode, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +762,7 @@ func (r *operatorSessionRepository) GetActiveSessionCount(ctx context.Context, d
 }
 
 func (r *operatorSessionRepository) GetAllSessions(ctx context.Context) ([]*models.OperatorSession, error) {
-	query := `SELECT os.id, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
+	query := `SELECT os.id, os.session_code, os.shift_lead_id, COALESCE(u1.name, '') as shift_lead_name, os.ended_by_id, COALESCE(u2.name, '') as ended_by_name, os.start_time, os.end_time, os.is_active, os.max_sign_ins, os.created_at, os.updated_at 
 	          FROM operator_sessions os
 	          LEFT JOIN users u1 ON os.shift_lead_id = u1.id
 	          LEFT JOIN users u2 ON os.ended_by_id = u2.id
@@ -746,7 +776,7 @@ func (r *operatorSessionRepository) GetAllSessions(ctx context.Context) ([]*mode
 	var sessions []*models.OperatorSession
 	for rows.Next() {
 		session := &models.OperatorSession{}
-		err := rows.Scan(&session.ID, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
+		err := rows.Scan(&session.ID, &session.SessionCode, &session.ShiftLeadID, &session.ShiftLeadName, &session.EndedByID, &session.EndedByName, &session.StartTime, &session.EndTime, &session.IsActive, &session.MaxSignIns, &session.CreatedAt, &session.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}
@@ -763,11 +793,12 @@ func (r *shiftSummaryRepository) CreateShiftSummary(ctx context.Context, summary
 
 func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uuid.UUID) (*models.ShiftSummary, error) {
 	summary := &models.ShiftSummary{}
-	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at 
+	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at, COALESCE(os.session_code, '')
 	          FROM shift_summary s
 	          LEFT JOIN users u ON s.created_by = u.id
+	          LEFT JOIN operator_sessions os ON s.session_id = os.id
 	          WHERE s.id = $1`
-	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+	err := r.db.Pool.QueryRow(ctx, query, id).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt, &summary.SessionCode)
 	if err != nil {
 		return nil, err
 	}
@@ -783,11 +814,12 @@ func (r *shiftSummaryRepository) GetShiftSummaryByID(ctx context.Context, id uui
 
 func (r *shiftSummaryRepository) GetShiftSummaryBySessionID(ctx context.Context, sessionID uuid.UUID) (*models.ShiftSummary, error) {
 	summary := &models.ShiftSummary{}
-	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at 
+	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at, COALESCE(os.session_code, '')
 	          FROM shift_summary s
 	          LEFT JOIN users u ON s.created_by = u.id
+	          LEFT JOIN operator_sessions os ON s.session_id = os.id
 	          WHERE s.session_id = $1 LIMIT 1`
-	err := r.db.Pool.QueryRow(ctx, query, sessionID).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+	err := r.db.Pool.QueryRow(ctx, query, sessionID).Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt, &summary.SessionCode)
 	if err != nil {
 		return nil, err
 	}
@@ -802,9 +834,10 @@ func (r *shiftSummaryRepository) GetShiftSummaryBySessionID(ctx context.Context,
 }
 
 func (r *shiftSummaryRepository) GetShiftSummaries(ctx context.Context) ([]*models.ShiftSummary, error) {
-	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at 
+	query := `SELECT s.id, s.session_id, s.created_by, COALESCE(u.name, '') as created_by_name, s.summary_date::text, s.summary_time::text, COALESCE(s.shift_note, ''), s.created_at, s.updated_at, COALESCE(os.session_code, '')
 	          FROM shift_summary s
 	          LEFT JOIN users u ON s.created_by = u.id
+	          LEFT JOIN operator_sessions os ON s.session_id = os.id
 	          ORDER BY s.summary_date DESC, s.summary_time DESC`
 	rows, err := r.db.Pool.Query(ctx, query)
 	if err != nil {
@@ -815,7 +848,7 @@ func (r *shiftSummaryRepository) GetShiftSummaries(ctx context.Context) ([]*mode
 	var summaries []*models.ShiftSummary
 	for rows.Next() {
 		summary := &models.ShiftSummary{}
-		err := rows.Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt)
+		err := rows.Scan(&summary.ID, &summary.SessionID, &summary.CreatedBy, &summary.CreatedByName, &summary.SummaryDate, &summary.SummaryTime, &summary.ShiftNote, &summary.CreatedAt, &summary.UpdatedAt, &summary.SessionCode)
 		if err != nil {
 			return nil, err
 		}
