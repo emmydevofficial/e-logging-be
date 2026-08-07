@@ -33,6 +33,7 @@ type LogHandler struct {
 	sessionRepo  db.OperatorSessionRepository
 	userRepo     db.UserRepository
 	activityRepo db.ActivityRepository
+	stationRepo  db.StationRepository
 }
 
 type StationHandler struct {
@@ -60,8 +61,8 @@ func NewAuthHandler(userRepo db.UserRepository, deviceRepo db.DeviceRepository, 
 	return &AuthHandler{userRepo: userRepo, deviceRepo: deviceRepo, activityRepo: activityRepo}
 }
 
-func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository, sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository, activityRepo db.ActivityRepository) *LogHandler {
-	return &LogHandler{logRepo: logRepo, deviceRepo: deviceRepo, sessionRepo: sessionRepo, userRepo: userRepo, activityRepo: activityRepo}
+func NewLogHandler(logRepo db.LogRepository, deviceRepo db.DeviceRepository, sessionRepo db.OperatorSessionRepository, userRepo db.UserRepository, activityRepo db.ActivityRepository, stationRepo db.StationRepository) *LogHandler {
+	return &LogHandler{logRepo: logRepo, deviceRepo: deviceRepo, sessionRepo: sessionRepo, userRepo: userRepo, activityRepo: activityRepo, stationRepo: stationRepo}
 }
 
 func NewStationHandler(stationRepo db.StationRepository) *StationHandler {
@@ -453,6 +454,7 @@ func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 		LogDate       string    `json:"log_date"`
 		LogTime       string    `json:"log_time"`
 		StationID     uuid.UUID `json:"station_id"`
+		StationName   string    `json:"station_name"`
 		OperatorName  string    `json:"operator_name"`
 		Action        string    `json:"action"`
 		Event         string    `json:"event"`
@@ -465,6 +467,26 @@ func (h *LogHandler) CreateLog(c *fiber.Ctx) error {
 			"success": false,
 			"error":   "Invalid request body",
 		})
+	}
+
+	// Allow a manually-typed location (station_name) when the station isn't
+	// in the dropdown list, finding or creating it on the fly.
+	if req.StationID == uuid.Nil {
+		trimmedName := strings.TrimSpace(req.StationName)
+		if trimmedName == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Location is required",
+			})
+		}
+		station, err := h.stationRepo.GetOrCreateStationByName(c.Context(), trimmedName)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"success": false,
+				"error":   "Failed to resolve location",
+			})
+		}
+		req.StationID = station.ID
 	}
 
 	logDate, err := time.Parse(time.RFC3339, req.LogDate)
@@ -560,6 +582,7 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 		LogDate       string    `json:"log_date"`
 		LogTime       string    `json:"log_time"`
 		StationID     uuid.UUID `json:"station_id"`
+		StationName   string    `json:"station_name"`
 		OperatorName  string    `json:"operator_name"`
 		Action        string    `json:"action"`
 		Event         string    `json:"event"`
@@ -572,6 +595,26 @@ func (h *LogHandler) UpdateLog(c *fiber.Ctx) error {
 			"success": false,
 			"error":   "Invalid request body",
 		})
+	}
+
+	// Allow a manually-typed location (station_name) when the station isn't
+	// in the dropdown list, finding or creating it on the fly.
+	if req.StationID == uuid.Nil {
+		trimmedName := strings.TrimSpace(req.StationName)
+		if trimmedName == "" {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"success": false,
+				"error":   "Location is required",
+			})
+		}
+		station, err := h.stationRepo.GetOrCreateStationByName(c.Context(), trimmedName)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"success": false,
+				"error":   "Failed to resolve location",
+			})
+		}
+		req.StationID = station.ID
 	}
 
 	logDate, err := time.Parse(time.RFC3339, req.LogDate)

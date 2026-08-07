@@ -109,7 +109,7 @@ func main() {
 
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(userRepo, deviceRepo, activityRepo)
-	logHandler := handlers.NewLogHandler(logRepo, deviceRepo, sessionRepo, userRepo, activityRepo)
+	logHandler := handlers.NewLogHandler(logRepo, deviceRepo, sessionRepo, userRepo, activityRepo, stationRepo)
 	stationHandler := handlers.NewStationHandler(stationRepo)
 	deviceHandler := handlers.NewDeviceHandler(deviceRepo)
 	userHandler := handlers.NewUserHandler(userRepo)

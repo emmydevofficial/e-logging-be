@@ -22,6 +22,7 @@ type UserRepository interface {
 type StationRepository interface {
 	CreateStation(ctx context.Context, station *models.Station) error
 	GetStations(ctx context.Context) ([]*models.Station, error)
+	GetOrCreateStationByName(ctx context.Context, name string) (*models.Station, error)
 }
 
 type DeviceRepository interface {
@@ -232,6 +233,27 @@ func (r *stationRepository) CreateStation(ctx context.Context, station *models.S
 	}
 	query := `INSERT INTO stations (name, station_type) VALUES ($1, $2) RETURNING id`
 	return r.db.Pool.QueryRow(ctx, query, station.Name, stationType).Scan(&station.ID)
+}
+
+// GetOrCreateStationByName finds a station by name (case-insensitive), or
+// creates it if it doesn't exist yet. Used when an operator manually types a
+// location that isn't in the stations dropdown.
+func (r *stationRepository) GetOrCreateStationByName(ctx context.Context, name string) (*models.Station, error) {
+	station := &models.Station{}
+
+	selectQuery := `SELECT id, name, COALESCE(station_type, '') FROM stations WHERE LOWER(name) = LOWER($1)`
+	err := r.db.Pool.QueryRow(ctx, selectQuery, name).Scan(&station.ID, &station.Name, &station.StationType)
+	if err == nil {
+		return station, nil
+	}
+
+	insertQuery := `INSERT INTO stations (name) VALUES ($1)
+	                ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+	                RETURNING id, name, COALESCE(station_type, '')`
+	if err := r.db.Pool.QueryRow(ctx, insertQuery, name).Scan(&station.ID, &station.Name, &station.StationType); err != nil {
+		return nil, err
+	}
+	return station, nil
 }
 
 func (r *stationRepository) GetStations(ctx context.Context) ([]*models.Station, error) {
